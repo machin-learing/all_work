@@ -1,0 +1,161 @@
+"""
+模型推理服务。
+
+支持的模型:
+  - deepseek_api:    真实调用 DeepSeek API
+  - lora_finetuned:  5 个 LoRA 适配器 (每个角色一个)
+  - transformer_scratch:  占位符
+"""
+
+import re
+import os
+
+import requests
+
+from app.core.config import settings
+
+
+# ══════════════════════════════════════════════════════════════
+# DeepSeek API (教师模型)
+# ══════════════════════════════════════════════════════════════
+
+ROLE_SPECS = {
+    "boss": {"name": "老板", "spec": "上级, 远距离, 工作领域。风格: 正式, 礼貌, 克制, 对结果负责。称呼用「您」。"},
+    "colleague": {"name": "同事", "spec": "平级, 中等距离, 工作领域。风格: 平等协作, 留有余地, 不卑不亢。用「咱们」「方便的话」。"},
+    "close_friend": {"name": "好朋友", "spec": "平等, 近距离, 生活领域。风格: 随意自然, 直来直去。可以吐槽, 不要说教。"},
+    "girlfriend": {"name": "女朋友", "spec": "平等, 最近距离, 恋爱领域。风格: 亲密, 温柔, 情绪优先。用「宝贝」「想你」。"},
+    "mother": {"name": "母亲", "spec": "晚辈到长辈, 近距离, 家庭领域。风格: 尊重中带温暖, 让长辈放心。用「妈」开头。"},
+}
+
+
+def _build_single_prompt(source_text: str, role_code: str) -> str:
+    role = ROLE_SPECS.get(role_code, ROLE_SPECS["boss"])
+    name, spec = role["name"], role["spec"]
+    return (
+        f"把我(说话者)的一句话, 改写成我对「{name}」说这句话的语气和措辞。\n"
+        f"只改变语气、称呼、礼貌程度、措辞, 不改变核心语义。\n"
+        f"{name}特征: {spec}\n"
+        f"判断: 明显越界才返回 N/A (如吐槽公司 -> boss N/A; 感情纠葛 -> boss/colleague N/A; 私密 -> 仅girlfriend)\n"
+        f"大多数日常对所有角色都正常, 不确定就正常改写。\n\n"
+        f"改写这句话:\"{source_text}\"\n对「{name}」应该怎么说? 只返回结果。"
+    )
+
+
+class DeepSeekAPI:
+    def __init__(self):
+        self.key = settings.deepseek_api_key
+        self.base = settings.deepseek_base_url.rstrip("/")
+        self.s = requests.Session()
+        self.s.headers.update({"Authorization": f"Bearer {self.key}", "Content-Type": "application/json"})
+
+    def rewrite(self, source_text: str, role_code: str) -> str:
+        try:
+            resp = self.s.post(
+                f"{self.base}/v1/chat/completions",
+                json={"model": settings.deepseek_model, "messages": [{"role": "user", "content": _build_single_prompt(source_text, role_code)}],
+                      "temperature": 0.8, "max_tokens": 512},
+                timeout=(30, 60),
+            )
+            resp.raise_for_status()
+            result = resp.json()["choices"][0]["message"]["content"].strip()
+            return re.sub(r'^["\']|["\']$', '', result)
+        except Exception as e:
+            return f"[DeepSeek error] {type(e).__name__}"
+
+
+# ══════════════════════════════════════════════════════════════
+# LoRA 多角色推理
+# ══════════════════════════════════════════════════════════════
+
+ROLES = ["boss", "colleague", "close_friend", "girlfriend", "mother"]
+LORA_BASE = settings.lora_model_dir  # e.g. "finetune/output"
+
+
+class LoRAInference:
+    """加载基座模型 + 5 个 LoRA 适配器, 按角色切换 (单模型 + 多适配器)。"""
+
+    def __init__(self):
+        import torch
+        from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+        from peft import PeftModel
+
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.tokenizer = AutoTokenizer.from_pretrained(settings.lora_base_model)
+
+        print(f"[LoRA] 加载基座模型 ...")
+        self.base_model = AutoModelForSeq2SeqLM.from_pretrained(
+            settings.lora_base_model, dtype=torch.float32,
+        ).to(self.device)
+
+        # 第一个适配器
+        first = ROLES[0]
+        first_path = os.path.join(LORA_BASE, first, "final")
+        self.model = PeftModel.from_pretrained(
+            self.base_model, first_path, adapter_name=first
+        )
+
+        # 其余适配器叠加
+        for role in ROLES[1:]:
+            path = os.path.join(LORA_BASE, role, "final")
+            self.model.load_adapter(path, adapter_name=role)
+            print(f"[LoRA] +{role}")
+
+        print(f"[LoRA] 共 {len(ROLES)} 个适配器就绪")
+
+    def rewrite(self, source_text: str, role_code: str) -> str:
+        if role_code not in ROLES:
+            return f"[错误] 未知角色: {role_code}"
+
+        self.model.set_adapter(role_code)
+
+        inp = self.tokenizer(source_text, return_tensors="pt", max_length=128, truncation=True)
+        inp = {k: v.to(self.device) for k, v in inp.items()}
+        out = self.model.generate(**inp, max_length=128, num_beams=4)
+        return self.tokenizer.decode(out[0], skip_special_tokens=True)
+
+
+# ══════════════════════════════════════════════════════════════
+# 占位符
+# ══════════════════════════════════════════════════════════════
+
+_PREFIX = {
+    "boss": "您好, ", "colleague": "你好, ", "close_friend": "兄弟, ",
+    "girlfriend": "宝贝, ", "mother": "妈, ",
+}
+_SUFFIX = {
+    "boss": "我会同步好相关安排。", "colleague": "有空的话麻烦看一下。",
+    "close_friend": "回头一起整。", "girlfriend": "别担心, 忙完我就来找你。",
+    "mother": "你早点休息, 不用等我。",
+}
+
+
+# ══════════════════════════════════════════════════════════════
+# 统一入口
+# ══════════════════════════════════════════════════════════════
+
+_deepseek: DeepSeekAPI | None = None
+_lora: LoRAInference | None = None
+
+
+def _get_deepseek():
+    global _deepseek
+    if _deepseek is None:
+        _deepseek = DeepSeekAPI()
+    return _deepseek
+
+
+def _get_lora():
+    global _lora
+    if _lora is None:
+        _lora = LoRAInference()
+    return _lora
+
+
+def rewrite_text(source_text: str, role_code: str, model_code: str) -> str:
+    if model_code == "deepseek_api":
+        return _get_deepseek().rewrite(source_text, role_code)
+    if model_code == "lora_finetuned":
+        return _get_lora().rewrite(source_text, role_code)
+    if model_code == "transformer_scratch":
+        return f"{_PREFIX.get(role_code, '')}{source_text}。{_SUFFIX.get(role_code, '')}"
+    return source_text
