@@ -16,6 +16,7 @@ import argparse
 import csv
 import datetime as dt
 import json
+import math
 import os
 import sys
 
@@ -28,6 +29,7 @@ from transformers import (
     EarlyStoppingCallback,
     Seq2SeqTrainer,
     Seq2SeqTrainingArguments,
+    TrainerCallback,
 )
 from peft import LoraConfig, TaskType, get_peft_model
 
@@ -73,6 +75,24 @@ class StyleDataset(Dataset):
         }
 
 
+class StopOnNanCallback(TrainerCallback):
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        logs = logs or {}
+        for key in ("loss", "eval_loss", "grad_norm"):
+            value = logs.get(key)
+            if value is None:
+                continue
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                continue
+            if math.isnan(numeric) or math.isinf(numeric):
+                raise FloatingPointError(
+                    f"Training stopped because {key} became {value}. "
+                    "Try bf16/fp32, lower learning rate, or smaller LoRA rank."
+                )
+
+
 def load_datasets(data_dir: str, tokenizer):
     paths = {
         "train": os.path.join(data_dir, "train.jsonl"),
@@ -100,6 +120,7 @@ def save_json(path: str, data) -> None:
 
 
 def save_training_config(path: str, args, dataset_sizes: dict, device: str) -> None:
+    precision = get_precision(args.precision, device)
     config = {
         "created_at": dt.datetime.now().isoformat(timespec="seconds"),
         "command": " ".join(sys.argv),
@@ -109,6 +130,9 @@ def save_training_config(path: str, args, dataset_sizes: dict, device: str) -> N
         "output_dir": args.output_dir,
         "epochs": args.epochs,
         "batch_size": args.batch_size,
+        "gradient_accumulation_steps": args.grad_accum_steps,
+        "precision": precision,
+        "gradient_checkpointing": not args.no_gradient_checkpointing,
         "learning_rate": args.lr,
         "max_input_len": MAX_INPUT_LEN,
         "max_output_len": MAX_OUTPUT_LEN,
@@ -121,6 +145,16 @@ def save_training_config(path: str, args, dataset_sizes: dict, device: str) -> N
         "dataset_sizes": dataset_sizes,
     }
     save_json(path, config)
+
+
+def get_precision(requested: str, device: str) -> str:
+    if device != "cuda":
+        return "fp32"
+    if requested != "auto":
+        return requested
+    if torch.cuda.is_bf16_supported():
+        return "bf16"
+    return "fp16"
 
 
 def save_loss_history(output_dir: str, log_history: list[dict]) -> None:
@@ -262,11 +296,14 @@ def main() -> None:
     parser.add_argument("--data-dir", default=DATA_DIR)
     parser.add_argument("--output-dir", default=OUTPUT_DIR)
     parser.add_argument("--epochs", type=int, default=8)
-    parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--batch-size", type=int, default=1)
+    parser.add_argument("--grad-accum-steps", type=int, default=4)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--lora-r", type=int, default=16)
     parser.add_argument("--lora-alpha", type=int, default=32)
     parser.add_argument("--lora-dropout", type=float, default=0.1)
+    parser.add_argument("--precision", choices=["auto", "bf16", "fp16", "fp32"], default="auto")
+    parser.add_argument("--no-gradient-checkpointing", action="store_true")
     parser.add_argument(
         "--max-predictions",
         type=int,
@@ -281,6 +318,12 @@ def main() -> None:
     print(f"base model: {args.model_path}")
     print(f"data: {args.data_dir}")
     print(f"LoRA r={args.lora_r} alpha={args.lora_alpha}")
+    precision = get_precision(args.precision, device)
+    use_bf16 = precision == "bf16"
+    use_fp16 = precision == "fp16"
+    model_dtype = torch.bfloat16 if use_bf16 else torch.float16 if use_fp16 else torch.float32
+    print(f"precision: {precision}")
+    print(f"gradient accumulation steps: {args.grad_accum_steps}")
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_path)
     train_ds, val_ds, test_ds = load_datasets(args.data_dir, tokenizer)
@@ -299,8 +342,11 @@ def main() -> None:
     print("loading base model...")
     model = AutoModelForSeq2SeqLM.from_pretrained(
         args.model_path,
-        dtype=torch.float32,
+        dtype=model_dtype,
     ).to(device)
+    if not args.no_gradient_checkpointing:
+        model.gradient_checkpointing_enable()
+        model.config.use_cache = False
 
     lora_config = LoraConfig(
         task_type=TaskType.SEQ_2_SEQ_LM,
@@ -317,6 +363,7 @@ def main() -> None:
         num_train_epochs=args.epochs,
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.batch_size,
+        gradient_accumulation_steps=args.grad_accum_steps,
         learning_rate=args.lr,
         warmup_ratio=0.1,
         weight_decay=0.01,
@@ -329,7 +376,8 @@ def main() -> None:
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
         greater_is_better=False,
-        fp16=False,
+        bf16=use_bf16,
+        fp16=use_fp16,
         max_grad_norm=1.0,
         report_to="none",
         predict_with_generate=True,
@@ -343,7 +391,7 @@ def main() -> None:
         train_dataset=train_ds,
         eval_dataset=val_ds,
         data_collator=data_collator,
-        callbacks=[EarlyStoppingCallback(early_stopping_patience=5)],
+        callbacks=[EarlyStoppingCallback(early_stopping_patience=5), StopOnNanCallback()],
     )
 
     trainer.train()

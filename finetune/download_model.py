@@ -19,6 +19,14 @@ from pathlib import Path
 
 DEFAULT_MODEL_ID = "bigscience/mt0-large"
 DEFAULT_SAVE_DIR = Path("./models/mt0-large")
+IGNORE_PATTERNS = [
+    "tf_model*",
+    "flax_model*",
+    "onnx/*",
+    "*.onnx",
+    "*.onnx_data",
+    "model.safetensors",
+]
 
 
 def download(model_id: str, save_dir: Path, force: bool = False) -> None:
@@ -34,7 +42,7 @@ def download(model_id: str, save_dir: Path, force: bool = False) -> None:
     tmp = snapshot_download(
         model_id,
         cache_dir="./.model_tmp",
-        ignore_file_pattern=["tf_model*", "flax_model*"],
+        ignore_file_pattern=IGNORE_PATTERNS,
     )
 
     for src in Path(tmp).iterdir():
