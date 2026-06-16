@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import http from '../api/http'
@@ -12,15 +12,22 @@ const roles = ref([])
 const records = ref([])
 const loading = ref(false)
 const showUserMenu = ref(false)
+const chatMessages = ref([])
+const chatContainer = ref(null)
+
+const examples = [
+  '我今天加班，可能晚点回去',
+  '我明天要开会，晚点再回复你',
+  '我刚到医院，检查结果还没出来',
+  '我这周项目有点赶，可能没时间一起吃饭'
+]
 
 const form = reactive({
   source_text: '',
   role_code: '',
-  model_code: ''
+  model_code: '',
+  mode: 'single'
 })
-
-const chatMessages = ref([])
-const chatContainer = ref(null)
 
 const isAdmin = computed(() => authStore.profile?.is_admin)
 
@@ -41,21 +48,25 @@ async function loadRecords() {
 }
 
 function roleLabel(code) {
-  const r = roles.value.find(r => r.code === code)
-  return r ? r.name : code
+  return roles.value.find(role => role.code === code)?.name || code
 }
 
 function modelLabel(code) {
-  const m = models.value.find(m => m.code === code)
-  return m ? m.name : code
+  return models.value.find(model => model.code === code)?.name || code
 }
 
 function selectHistory(record) {
   form.role_code = record.role_code
   form.model_code = record.model_code
+  form.mode = 'single'
   chatMessages.value = [
     { type: 'user', text: record.source_text },
-    { type: 'model', text: record.rewritten_text, role_code: record.role_code, model_code: record.model_code }
+    {
+      type: 'model',
+      text: record.rewritten_text,
+      role_code: record.role_code,
+      model_code: record.model_code
+    }
   ]
 }
 
@@ -64,25 +75,101 @@ function newChat() {
   form.source_text = ''
 }
 
+function useExample(example) {
+  form.source_text = example
+}
+
+async function createTransfer(text, roleCode, modelCode) {
+  const { data } = await http.post('/transfers', {
+    source_text: text,
+    role_code: roleCode,
+    model_code: modelCode
+  })
+  return data
+}
+
+async function submitSingle(text) {
+  const data = await createTransfer(text, form.role_code, form.model_code)
+  chatMessages.value.push({
+    type: 'model',
+    text: data.rewritten_text,
+    role_code: data.role_code,
+    model_code: data.model_code
+  })
+  records.value.unshift(data)
+}
+
+async function submitRoleCompare(text) {
+  const settled = await Promise.allSettled(
+    roles.value.map(role => createTransfer(text, role.code, form.model_code))
+  )
+  const results = settled.map((result, index) => {
+    const role = roles.value[index]
+    if (result.status === 'fulfilled') {
+      records.value.unshift(result.value)
+      return {
+        role_code: result.value.role_code,
+        model_code: result.value.model_code,
+        text: result.value.rewritten_text
+      }
+    }
+    return {
+      role_code: role.code,
+      model_code: form.model_code,
+      text: result.reason?.response?.data?.detail || '请求失败',
+      isError: true
+    }
+  })
+  chatMessages.value.push({
+    type: 'comparison',
+    title: `五角色对比 · ${modelLabel(form.model_code)}`,
+    results
+  })
+}
+
+async function submitModelCompare(text) {
+  const settled = await Promise.allSettled(
+    models.value.map(model => createTransfer(text, form.role_code, model.code))
+  )
+  const results = settled.map((result, index) => {
+    const model = models.value[index]
+    if (result.status === 'fulfilled') {
+      records.value.unshift(result.value)
+      return {
+        role_code: result.value.role_code,
+        model_code: result.value.model_code,
+        text: result.value.rewritten_text
+      }
+    }
+    return {
+      role_code: form.role_code,
+      model_code: model.code,
+      text: result.reason?.response?.data?.detail || '请求失败',
+      isError: true
+    }
+  })
+  chatMessages.value.push({
+    type: 'comparison',
+    title: `多模型对比 · ${roleLabel(form.role_code)}`,
+    results
+  })
+}
+
 async function submitRewrite() {
   const text = form.source_text.trim()
   if (!text || loading.value) return
+
   loading.value = true
   chatMessages.value.push({ type: 'user', text })
 
   try {
-    const { data } = await http.post('/transfers', {
-      source_text: text,
-      role_code: form.role_code,
-      model_code: form.model_code
-    })
-    chatMessages.value.push({
-      type: 'model',
-      text: data.rewritten_text,
-      role_code: data.role_code,
-      model_code: data.model_code
-    })
-    records.value.unshift(data)
+    if (form.mode === 'roles') {
+      await submitRoleCompare(text)
+    } else if (form.mode === 'models') {
+      await submitModelCompare(text)
+    } else {
+      await submitSingle(text)
+    }
   } catch (error) {
     chatMessages.value.push({
       type: 'model',
@@ -118,14 +205,12 @@ onMounted(async () => {
 
 <template>
   <div class="app-layout">
-    <!-- ====== 左侧边栏 ====== -->
     <aside class="sidebar">
       <div class="sidebar-header">
         <h2>风格迁移</h2>
         <button class="new-chat-btn" @click="newChat">+ 新对话</button>
       </div>
 
-      <!-- 历史记录 -->
       <div class="history-list">
         <div
           v-for="record in records"
@@ -134,13 +219,14 @@ onMounted(async () => {
           @click="selectHistory(record)"
         >
           <div class="history-role">{{ roleLabel(record.role_code) }}</div>
-          <div class="history-text">{{ record.source_text.slice(0, 40) }}{{ record.source_text.length > 40 ? '...' : '' }}</div>
+          <div class="history-text">
+            {{ record.source_text.slice(0, 40) }}{{ record.source_text.length > 40 ? '...' : '' }}
+          </div>
           <div class="history-meta">{{ record.model_name }}</div>
         </div>
         <div v-if="records.length === 0" class="history-empty">暂无历史记录</div>
       </div>
 
-      <!-- 底部用户区 -->
       <div class="sidebar-footer">
         <div class="user-bar" @click="showUserMenu = !showUserMenu">
           <div class="user-avatar">{{ authStore.profile?.full_name?.[0] || 'U' }}</div>
@@ -155,19 +241,30 @@ onMounted(async () => {
       </div>
     </aside>
 
-    <!-- ====== 右侧主区域 ====== -->
     <main class="main-area">
-      <!-- 角色选择栏 -->
       <div class="chat-header">
-        <div class="role-selector">
-          <span class="selector-label">说话对象</span>
+        <div class="mode-tabs">
+          <button :class="{ active: form.mode === 'single' }" @click="form.mode = 'single'">
+            单次改写
+          </button>
+          <button :class="{ active: form.mode === 'roles' }" @click="form.mode = 'roles'">
+            五角色对比
+          </button>
+          <button :class="{ active: form.mode === 'models' }" @click="form.mode = 'models'">
+            多模型对比
+          </button>
+        </div>
+
+        <div class="role-selector" v-if="form.mode !== 'roles'">
+          <span class="selector-label">对象</span>
           <select v-model="form.role_code">
             <option v-for="role in roles" :key="role.code" :value="role.code">
               {{ role.name }}
             </option>
           </select>
         </div>
-        <div class="model-selector">
+
+        <div class="model-selector" v-if="form.mode !== 'models'">
           <span class="selector-label">模型</span>
           <select v-model="form.model_code">
             <option v-for="model in models" :key="model.code" :value="model.code">
@@ -177,50 +274,83 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- 对话区域 -->
+      <div class="example-row">
+        <span>示例</span>
+        <button v-for="example in examples" :key="example" @click="useExample(example)">
+          {{ example }}
+        </button>
+      </div>
+
       <div class="chat-area" ref="chatContainer">
         <div v-if="chatMessages.length === 0" class="chat-placeholder">
-          <div class="placeholder-icon">💬</div>
-          <h3>选择一个说话对象，开始对话</h3>
-          <p>输入你想说的话，模型会根据你选择的角色改写语气和措辞</p>
+          <div class="placeholder-icon">文本风格迁移</div>
+          <h3>输入一句话，观察不同对象或模型下的表达差异</h3>
+          <p>五角色对比适合展示研究主题；多模型对比适合比较 DeepSeek、mT0-LoRA 和 baseline。</p>
         </div>
 
-        <div v-for="(msg, idx) in chatMessages" :key="idx" class="message-row"
-             :class="msg.type === 'user' ? 'message-right' : 'message-left'">
-          <div v-if="msg.type === 'model'" class="avatar model-avatar">
-            {{ roleLabel(msg.role_code)?.[0] || 'M' }}
-          </div>
-          <div class="bubble" :class="{
-            'bubble-user': msg.type === 'user',
-            'bubble-model': msg.type === 'model',
-            'bubble-error': msg.isError
-          }">
-            <div v-if="msg.type === 'model'" class="bubble-meta">
-              {{ roleLabel(msg.role_code) }} · {{ modelLabel(msg.model_code) }}
+        <div
+          v-for="(msg, idx) in chatMessages"
+          :key="idx"
+          class="message-row"
+          :class="msg.type === 'user' ? 'message-right' : 'message-left'"
+        >
+          <template v-if="msg.type === 'comparison'">
+            <div class="comparison-panel">
+              <div class="comparison-title">{{ msg.title }}</div>
+              <div class="comparison-grid">
+                <div
+                  v-for="(item, itemIdx) in msg.results"
+                  :key="itemIdx"
+                  class="comparison-card"
+                  :class="{ 'comparison-error': item.isError }"
+                >
+                  <div class="comparison-meta">
+                    {{ roleLabel(item.role_code) }} · {{ modelLabel(item.model_code) }}
+                  </div>
+                  <div class="comparison-text">{{ item.text }}</div>
+                </div>
+              </div>
             </div>
-            <div class="bubble-text">{{ msg.text }}</div>
-          </div>
-          <div v-if="msg.type === 'user'" class="avatar user-avatar">
-            {{ authStore.profile?.full_name?.[0] || 'U' }}
-          </div>
+          </template>
+
+          <template v-else>
+            <div v-if="msg.type === 'model'" class="avatar model-avatar">
+              {{ roleLabel(msg.role_code)?.[0] || 'M' }}
+            </div>
+            <div
+              class="bubble"
+              :class="{
+                'bubble-user': msg.type === 'user',
+                'bubble-model': msg.type === 'model',
+                'bubble-error': msg.isError
+              }"
+            >
+              <div v-if="msg.type === 'model'" class="bubble-meta">
+                {{ roleLabel(msg.role_code) }} · {{ modelLabel(msg.model_code) }}
+              </div>
+              <div class="bubble-text">{{ msg.text }}</div>
+            </div>
+            <div v-if="msg.type === 'user'" class="avatar user-avatar">
+              {{ authStore.profile?.full_name?.[0] || 'U' }}
+            </div>
+          </template>
         </div>
       </div>
 
-      <!-- 输入区域 -->
       <div class="chat-input-bar">
         <textarea
           v-model="form.source_text"
-          placeholder="输入你想说的话，例如：我今天加班，可能晚点回去。"
+          placeholder="输入你想改写的话，例如：我今天加班，可能晚点回去"
           rows="1"
-          @keydown.enter.exact.prevent="submitRewrite"
           :disabled="loading"
+          @keydown.enter.exact.prevent="submitRewrite"
         />
         <button
           class="send-btn"
           :disabled="!form.source_text.trim() || loading"
           @click="submitRewrite"
         >
-          发送
+          {{ loading ? '生成中' : '生成' }}
         </button>
       </div>
     </main>

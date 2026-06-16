@@ -1,0 +1,380 @@
+\documentclass[12pt,a4paper]{ctexart}
+
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs,longtable}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{xcolor}
+\usepackage{listings}
+
+\hypersetup{colorlinks=true, linkcolor=blue, citecolor=blue, urlcolor=blue}
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  numbers=left,
+  numberstyle=\tiny,
+  backgroundcolor=\color{gray!5}
+}
+
+\title{\heiti 文献综述：中文文本风格迁移与关系感知生成研究}
+\author{\kaishu 王浩楠 \quad 张博凇 \quad 范智杰 \quad 何顺康 \quad 陈佳铭}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+文本风格迁移是自然语言生成领域的重要任务，旨在保持文本语义内容不变的同时改变其风格属性。现有研究多集中于情感极性、正式度、作者属性和文本体裁等风格维度，而对“说话对象”这一日常沟通中极为关键的社会语用变量关注不足。中文交流具有丰富的称呼系统、礼貌等级和亲疏表达方式，同一句话在面对老板、同事、朋友、恋人和家人时往往需要采用不同的语气与信息组织方式。因此，关系感知的中文文本风格迁移不仅具有应用价值，也为文本风格迁移研究提供了更细粒度的任务设定。
+
+本文围绕“小样本条件下中文多角色文本风格迁移”这一研究主题，从五个方面梳理相关文献：第一，回顾文本风格迁移的任务定义、主流方法和评估指标；第二，分析中文对话数据集及其在角色风格标注方面的不足；第三，总结预训练语言模型、指令微调模型以及 mT5/mT0 等多语言 Seq2Seq 模型的发展；第四，讨论 LoRA 等参数高效微调技术在小样本生成任务中的优势；第五，从礼貌理论、语域理论和语言顺应论角度解释社会关系如何影响语言表达。最后，本文指出现有研究在中文关系角色风格迁移方向上的空白，并明确本项目的数据构建、模型训练和系统实现定位。
+\end{abstract}
+
+\newpage
+\tableofcontents
+\newpage
+
+\section{引言}
+
+语言表达不是孤立的信息编码过程，而是嵌入具体人际关系和交际场景中的社会行为。同一句事实内容，在不同对象面前往往需要采用不同表达方式。例如“我今天加班，可能晚点回去”对老板应突出工作安排和进度责任，对朋友可以自然随意，对恋人需要兼顾情绪安抚，对母亲则需要让长辈放心。这种差异体现了语言使用者对社会关系、礼貌规范和场景预期的综合判断。
+
+自然语言处理中的文本风格迁移任务为建模这类现象提供了技术基础。早期研究主要关注情感极性转换，例如将负面评论改写为正面评论；也有研究关注正式度转换，例如将口语表达改写为书面表达。然而，“关系角色”这一风格维度更加复杂：它不仅包含正式度，还涉及权力差、亲密距离、称呼选择、情绪表达和信息优先级。因此，关系感知生成可被看作文本风格迁移、社会语言学和语用学交叉处的细粒度生成任务。
+
+本项目聚焦中文场景下的多角色文本风格迁移，目标是在保持核心语义不变的情况下，根据目标对象生成合适表达。为支撑该任务，需要回答三个关键问题：
+
+\begin{enumerate}[leftmargin=2em]
+  \item 如何构建包含多类关系对象的中文平行改写数据？
+  \item 在小样本条件下，如何选择合适的预训练模型和微调方式？
+  \item 如何评估改写结果是否同时满足语义保持、角色适配和自然流畅？
+\end{enumerate}
+
+以下章节将围绕这些问题展开文献梳理。
+
+\section{文本风格迁移研究}
+
+\subsection{任务定义}
+
+文本风格迁移（Text Style Transfer, TST）通常被定义为：给定源文本 $x$ 和目标风格 $s_t$，生成文本 $y$，使得 $y$ 在内容上与 $x$ 保持一致，同时在风格上符合 $s_t$。形式化表示为：
+
+\[
+y = G_\theta(x, s_t)
+\]
+
+其中，$G_\theta$ 是生成模型，$s_t$ 可以是情感、正式度、作者属性、文本体裁或其他风格标签。该任务的难点在于“内容”和“风格”往往并非完全可分离。某些词语既承载语义，又带有风格信息，因此简单替换关键词可能导致语义损失或表达不自然。
+
+在本项目中，目标风格不是单一标签，而是目标对象 $r$ 及其对应的社会关系特征。生成结果需要满足三类约束：
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{语义保持：} 不改变原句的时间、地点、人物、数量和核心事件。
+  \item \textbf{角色适配：} 表达方式符合目标对象的关系距离和礼貌预期。
+  \item \textbf{自然流畅：} 输出应是自然中文，而不是机械模板拼接。
+\end{itemize}
+
+\subsection{有监督风格迁移}
+
+当存在平行语料时，文本风格迁移可以直接建模为 Seq2Seq 监督学习任务。模型输入源风格句子，输出目标风格句子。GYAFC 数据集是正式度迁移领域的代表性数据集，它收集了非正式句子及其正式改写版本，为有监督正式度迁移提供了标准基准。
+
+有监督方法的优点是训练目标明确，生成结果通常更稳定；缺点是平行数据构建成本高。对于中文关系角色风格迁移，天然平行语料几乎不存在：同一个人很少会将同一句话分别对老板、同事、朋友、恋人和母亲说一遍。因此，本项目采用“大语言模型辅助生成+自动质检”的方式构建弱监督平行数据。
+
+\subsection{无监督与弱监督方法}
+
+在缺乏平行语料的情况下，研究者提出了多种无监督风格迁移方法。典型思路包括：
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{风格内容解耦：} 将文本表示分解为内容向量和风格向量，在生成时替换风格向量。
+  \item \textbf{对抗训练：} 使用风格分类器约束生成文本符合目标风格，同时通过重构损失保持内容。
+  \item \textbf{回译与循环一致性：} 通过源风格到目标风格再回到源风格的循环约束保持语义。
+  \item \textbf{伪平行数据生成：} 利用规则或大语言模型构造近似平行样本。
+\end{enumerate}
+
+这些方法降低了数据需求，但在细粒度角色风格迁移中仍面临挑战。关系风格并非简单词表差异，模型需要根据对象判断哪些信息应突出、哪些表达应弱化。因此，本项目选择弱监督路径：先利用强教师模型生成候选改写，再通过规则过滤提升数据可信度，最后用较小的可部署模型学习该映射。
+
+\subsection{评估指标}
+
+文本风格迁移通常从三个维度评估：
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{内容保持：} 常用 BLEU、ROUGE、BERTScore 或语义相似度衡量。
+  \item \textbf{风格准确：} 常用风格分类器判断输出是否符合目标风格。
+  \item \textbf{流畅自然：} 可用语言模型困惑度或人工评分衡量。
+\end{itemize}
+
+对于本项目，传统自动指标并不完全充分。比如 ROUGE 高可能只是因为模型几乎没有改写；ROUGE 低也可能是自然重述而非语义漂移。因此更合理的评估应结合规则检查和人工评价，包括语义保持、角色适配、自然流畅和角色区分四个维度。
+
+\subsection{相关研究路线对比}
+
+为进一步明确本项目与已有文本风格迁移研究的关系，可从数据形式、建模方法和评估方式三个角度进行比较。后续写作时可在表~\ref{tab:tst_compare} 中补充更具体的代表文献、实验数据集和指标结果。
+
+\begin{longtable}{p{2.6cm}|p{3.1cm}|p{3.1cm}|p{3.4cm}}
+\caption{文本风格迁移相关研究路线对比}
+\label{tab:tst_compare}\\
+\toprule
+研究路线 & 典型任务 & 优点 & 局限及对本项目启发 \\
+\midrule
+\endfirsthead
+\toprule
+研究路线 & 典型任务 & 优点 & 局限及对本项目启发 \\
+\midrule
+\endhead
+有监督 Seq2Seq & 正式度迁移、平行改写 & 训练目标明确，输出稳定 & 依赖高质量平行语料；中文多角色平行数据缺乏，需要自建弱监督数据。 \\
+无监督风格迁移 & 情感迁移、作者风格迁移 & 不依赖平行语料，数据获取成本较低 & 细粒度关系风格难以只靠风格分类器约束，容易出现语义漂移。 \\
+大语言模型改写 & 任意风格提示改写 & 生成质量高，提示灵活 & 成本、可控性和稳定性不足；适合作为教师模型构造训练数据。 \\
+指令微调模型 & 多任务文本生成、条件改写 & 能理解任务说明和目标条件 & 小样本下仍依赖任务数据质量；适合与 LoRA 结合。 \\
+参数高效微调 & LoRA、Adapter、Prefix-Tuning & 训练和部署成本低，便于保留基座能力 & 需要设计稳定输入模板和可靠评价体系，避免只学到模板词。 \\
+\bottomrule
+\end{longtable}
+
+\subsection{本项目评价维度设计}
+
+结合上述研究，本项目后续实验评价可分为自动规则检查和人工评价两类。自动规则检查主要面向事实保持和数据质量，例如数字、时间词、长度比例和角色间相似度；人工评价则面向自动指标难以覆盖的语用合理性，例如说话对象是否合适、语气是否自然、是否存在过度亲密或过度正式等问题。
+
+\begin{table}[H]
+\centering
+\caption{关系风格迁移评价维度}
+\label{tab:evaluation_dimensions}
+\begin{tabular}{p{3cm}|p{4.4cm}|p{5cm}}
+\toprule
+评价维度 & 关注问题 & 可采用方法 \\
+\midrule
+语义保持 & 是否保留原句核心事实、时间、数量和事件关系 & 数字/时间规则检查，人工 1--5 分评分 \\
+角色适配 & 是否符合老板、同事、朋友、恋人、母亲等对象预期 & 人工评分，错误案例归类 \\
+自然流畅 & 是否符合中文日常表达习惯 & 人工评分，低质量样例分析 \\
+角色区分 & 五类角色输出是否真正存在语气和信息组织差异 & 角色间相似度，横向样例对比 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{中文对话数据资源}
+
+\subsection{公开中文对话语料}
+
+中文对话生成研究中常用的数据包括 LCCC、豆瓣多轮对话、微博短文本对话、E-commerce 客服对话等。其中 LCCC 由大规模微博对话清洗而成，覆盖日常生活、情绪表达、工作学习、出行安排等多类场景，适合作为本项目的原始语料来源。
+
+LCCC 的优势在于规模较大、表达自然、口语化程度高；不足在于数据并未标注说话对象，也缺乏明确的角色关系信息。因此，直接使用 LCCC 训练模型无法得到关系风格迁移能力，需要额外进行中性句抽取和角色改写标注。
+
+\subsection{关系角色标注缺口}
+
+现有中文数据集多面向情感分析、文本分类、问答、摘要和开放域对话，较少包含“同一语义面对不同关系对象”的平行表达。即使在对话数据集中，角色信息也通常体现为说话人身份或轮次，而不是“说话者对目标对象的表达策略”。
+
+这造成两个问题：
+
+\begin{enumerate}[leftmargin=2em]
+  \item 缺乏可直接训练关系风格迁移模型的中文数据。
+  \item 缺乏标准评估集，难以横向比较不同方法。
+\end{enumerate}
+
+本项目的数据构建工作正是为了弥补这一缺口。通过从 LCCC 抽取第一人称中性句，再用教师模型生成五类角色改写，项目构建了一个面向中文关系风格迁移的弱监督数据集。
+
+\subsection{数据质量问题}
+
+大语言模型生成数据具有成本低、规模可控、格式灵活的优势，但也会引入质量问题。常见问题包括事实增删、语义漂移、输出模板化、角色差异不足和不合适内容误改写等。因此，近年来“LLM 生成数据+质量过滤”成为小样本任务中的常见策略。
+
+本项目的质量过滤规则具有任务针对性。例如，数字和时间信息在日常表达中常是核心事实，不能因风格迁移而丢失；称呼词虽然能体现角色，但如果只是添加称呼而不调整表达结构，则不能算高质量迁移。这些规则将语言学直觉转化为可执行的数据清洗逻辑。
+
+\subsection{中文角色风格数据集构建思路}
+
+由于缺少可直接使用的中文多角色平行语料，本项目采用“公开对话语料筛选+教师模型弱标注+自动质检过滤”的构建路线。该路线的关键不是简单扩大样本规模，而是控制源句的可改写性和目标句的事实一致性。后续可在本节补充数据集构建过程中的具体筛选规则、角色样本分布和典型过滤案例，使文献综述与科研实训中的数据章节形成呼应。
+
+\begin{table}[H]
+\centering
+\caption{中文角色风格数据构建要点}
+\label{tab:dataset_building_points}
+\begin{tabular}{p{3cm}|p{4.5cm}|p{5cm}}
+\toprule
+环节 & 主要目标 & 需要说明的内容 \\
+\midrule
+源句筛选 & 获得可面向多对象表达的中性句 & 句长、第一人称、强情绪、广告和已含角色称呼的过滤规则。 \\
+角色设定 & 明确目标对象差异 & 五类对象的权力关系、亲密程度、典型表达重点。 \\
+教师改写 & 生成弱监督平行样本 & 提示词、输出格式、N/A 处理和批量生成策略。 \\
+质量过滤 & 降低语义漂移和模板化问题 & 数字、时间、长度、相似度、模板词和角色间相似度检查。 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{预训练模型与指令微调}
+
+\subsection{T5 与文本到文本范式}
+
+T5 将各种自然语言处理任务统一为文本到文本格式，即输入和输出都是字符串。这种范式适合风格迁移任务，因为改写本质上就是从源文本生成目标文本。原始 T5 主要面向英文语料，在中文任务上能力有限，因此中文或多语言场景通常采用 mT5、mBART、Chinese-T5 等模型。
+
+\subsection{mT5}
+
+mT5 是大规模多语言文本到文本预训练模型，覆盖包括中文在内的大量语言。它继承了 T5 的 Seq2Seq 架构，可用于翻译、摘要、问答和改写等任务。对于中文风格迁移，mT5 的优势在于具备多语言生成能力；不足在于它本身并未专门接受指令式任务训练，对“任务、对象、风格、原句、改写”这类字段的理解主要依赖下游微调数据。
+
+\subsection{mT0}
+
+mT0 可以看作在 mT5 基础上进行多任务指令微调后的模型。它在大量指令式任务上训练，因此更适合处理自然语言任务描述。例如：
+
+\begin{lstlisting}[language={}]
+任务：保持原意，按目标对象改写语气。
+对象：老板
+风格：正式、礼貌、克制
+原句：我今天加班，可能晚点回去
+改写：
+\end{lstlisting}
+
+对于本项目而言，mT0 的优势在于它更容易利用输入中的“任务”和“风格”字段，在小样本条件下比纯 mT5 更适合作为基座模型。需要注意的是，mT0 仍然不是对话式大模型，它对具体角色语气的掌握仍取决于微调数据质量。因此，本项目采用“短指令模板+角色风格词+LoRA 微调”的方式，将 mT0 的指令理解能力和本项目数据结合起来。
+
+\section{参数高效微调技术}
+
+\subsection{全量微调的局限}
+
+全量微调需要更新预训练模型全部参数，计算和存储成本较高。对于 mT0-large 这类数亿参数模型，全量微调不仅显存需求大，也容易在小样本数据上过拟合。此外，如果为不同角色保存多个完整模型，部署和维护成本也会迅速上升。
+
+\subsection{Adapter、Prefix-Tuning 与 Prompt-Tuning}
+
+Adapter 方法在 Transformer 层中插入小型可训练模块，只更新这些模块参数；Prefix-Tuning 和 Prompt-Tuning 则通过学习连续前缀或软提示来控制生成。这些方法都属于参数高效微调，核心目标是在冻结大部分预训练参数的情况下适配下游任务。
+
+这些方法的共同优势是训练成本低、部署灵活；不足是表达能力可能受限，且不同方法对任务格式和模型结构较敏感。
+
+\subsection{LoRA}
+
+LoRA 通过低秩矩阵分解建模权重增量，不直接修改原始权重。设原模型权重为 $W$，LoRA 学习：
+
+\[
+\Delta W = BA
+\]
+
+其中 $A$ 和 $B$ 是低秩矩阵。训练时只更新 $A$ 和 $B$，推理时将低秩增量作用于原模型。LoRA 的优点包括：
+
+\begin{itemize}[leftmargin=2em]
+  \item 可训练参数少，显存占用低。
+  \item 适配器文件小，便于保存和切换。
+  \item 保留预训练模型原有语言能力。
+  \item 与 Seq2Seq 生成任务兼容性较好。
+\end{itemize}
+
+\subsection{单 LoRA 与多 LoRA}
+
+对于多角色风格迁移，可以有两种方案：
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{多 LoRA：} 每个角色训练一个适配器，推理时按角色切换。
+  \item \textbf{单 LoRA：} 所有角色共享一个适配器，输入中显式加入角色条件。
+\end{enumerate}
+
+多 LoRA 结构清晰，但在小样本条件下每个适配器可用数据较少，容易学到角色模板。单 LoRA 则能共享所有角色数据，使模型共同学习语义保持、句式重组和中文自然表达，再由“对象”和“风格”字段控制输出。因此，本项目最终采用 mT0-large + 单 LoRA 的方案。
+
+\section{语用学与关系感知生成}
+
+\subsection{礼貌理论}
+
+Brown 和 Levinson 的礼貌理论指出，语言表达会受到权力差（Power）、社会距离（Distance）和行为强加程度（Rank）的影响。说话者面对上级时通常更正式、克制、间接；面对亲密对象时则更直接、情绪化或带有安抚性。
+
+本项目的五类角色可以映射到不同语用维度：
+
+\begin{table}[H]
+\centering
+\caption{角色语用特征}
+\begin{tabular}{c|c|c|c|c}
+\toprule
+对象 & 权力关系 & 社会距离 & 场景领域 & 表达重点 \\
+\midrule
+老板 & 对方较高 & 远 & 工作 & 正式、结果、进度 \\
+同事 & 平级 & 中 & 工作 & 协作、边界、礼貌 \\
+好朋友 & 平级 & 近 & 生活 & 随意、直接、自然 \\
+女朋友 & 平级 & 最近 & 恋爱 & 亲密、温柔、情绪关照 \\
+母亲 & 长辈 & 近 & 家庭 & 尊重、温暖、让长辈放心 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{语域理论}
+
+语域理论认为，语言形式会随场域、语旨和语式变化。场域对应谈论内容，语旨对应参与者关系，语式对应交流媒介。本项目中的“角色风格”主要属于语旨变化：同一内容因参与者关系不同而改变表达方式。
+
+例如，工作内容对老板表达时会突出责任和安排，对朋友表达时可能变为吐槽或说明，对母亲表达时则可能弱化压力、强调安全。这说明关系风格迁移不仅是词汇替换，也涉及信息组织结构的变化。
+
+\subsection{语言顺应论}
+
+语言顺应论强调，说话者会根据交际对象、语境和目的动态调整语言选择。本项目中的模型目标可以理解为学习一种自动化的语言顺应能力：给定原句和目标对象，模型选择更适合该对象的称呼、语气和信息重点。
+
+这一理论为数据标注和质量检查提供了依据。例如，对老板的改写不应过度情绪化，对母亲的改写不应命令式，对女朋友的改写不应像工作汇报。模型输出若违反这些关系预期，即使语义正确，也不能算高质量结果。
+
+\section{研究不足与本文定位}
+
+\subsection{现有研究不足}
+
+综合以上文献，当前研究存在以下不足：
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{风格维度较粗：} 多数文本风格迁移研究集中于情感或正式度，缺少对关系对象的细粒度建模。
+  \item \textbf{中文角色数据缺乏：} 现有中文对话数据没有提供同一语义在不同对象下的平行表达。
+  \item \textbf{小样本训练方案不足：} 关系角色数据构建成本高，需要适合小样本的参数高效微调方案。
+  \item \textbf{评估体系不完善：} 自动指标难以同时衡量语义保持、角色适配和自然度。
+  \item \textbf{系统化实现较少：} 很多研究停留在离线实验，没有提供可交互的模型对比和展示平台。
+\end{enumerate}
+
+\subsection{本项目定位}
+
+针对上述不足，本项目将研究定位为“中文关系感知文本风格迁移”的小样本实践探索。具体贡献包括：
+
+\begin{enumerate}[leftmargin=2em]
+  \item 从 LCCC 中抽取中性第一人称句子，构建五类目标对象下的中文平行改写数据。
+  \item 使用 DeepSeek 作为教师模型生成弱监督数据，并加入自动质检脚本提升数据可靠性。
+  \item 采用 mT0-large + 单 LoRA 微调，以短指令模板实现角色条件控制。
+  \item 开发前后端系统，支持单次改写、五角色对比、多模型对比和历史记录管理。
+\end{enumerate}
+
+因此，本项目既不是单纯调用大语言模型，也不是只做离线模型训练，而是将数据构建、模型微调、评估和系统展示结合起来，形成一个完整的机器学习科研实训项目。
+
+\section{结论}
+
+关系感知的中文文本风格迁移是一个具有现实意义但研究相对不足的方向。它要求模型不仅能生成流畅中文，还要理解说话对象对表达方式的影响。文献综述表明，文本风格迁移、中文对话数据、指令微调模型、LoRA 参数高效微调和语用学理论分别为本项目提供了技术和理论基础。
+
+在此基础上，本项目选择 LCCC 作为数据来源，DeepSeek 作为教师模型，mT0-large 作为指令式基座模型，LoRA 作为小样本微调方法，并通过 Web 系统实现可视化对比展示。这一路线能够较好地服务于“小样本条件下中文多角色文本风格迁移”的研究目标。
+
+\begin{thebibliography}{99}
+
+\bibitem{rao2018gyafc}
+S.~Rao and J.~Tetreault, ``Dear Sir or Madam, May I Introduce the GYAFC Dataset,'' \emph{NAACL}, 2018.
+
+\bibitem{fu2018style}
+Z.~Fu \emph{et al.}, ``Style Transfer in Text: Exploration and Evaluation,'' \emph{AAAI}, 2018.
+
+\bibitem{shen2017}
+T.~Shen \emph{et al.}, ``Style Transfer from Non-Parallel Text by Cross-Alignment,'' \emph{NeurIPS}, 2017.
+
+\bibitem{john2019}
+V.~John \emph{et al.}, ``Disentangled Representation Learning for Non-Parallel Text Style Transfer,'' \emph{ACL}, 2019.
+
+\bibitem{reif2022}
+E.~Reif \emph{et al.}, ``A Recipe for Arbitrary Text Style Transfer with Large Language Models,'' \emph{ACL}, 2022.
+
+\bibitem{wang2020lccc}
+Y.~Wang \emph{et al.}, ``A Large-Scale Chinese Short-Text Conversation Dataset,'' \emph{NLPCC}, 2020.
+
+\bibitem{xue2021mt5}
+L.~Xue \emph{et al.}, ``mT5: A Massively Multilingual Pre-trained Text-to-Text Transformer,'' \emph{NAACL}, 2021.
+
+\bibitem{sanh2022mt0}
+V.~Sanh \emph{et al.}, ``Multitask Prompted Training Enables Zero-Shot Task Generalization,'' \emph{ICLR}, 2022.
+
+\bibitem{hu2022lora}
+E.~J.~Hu \emph{et al.}, ``LoRA: Low-Rank Adaptation of Large Language Models,'' \emph{ICLR}, 2022.
+
+\bibitem{houlsby2019}
+N.~Houlsby \emph{et al.}, ``Parameter-Efficient Transfer Learning for NLP,'' \emph{ICML}, 2019.
+
+\bibitem{li2021prefix}
+X.~L.~Li and P.~Liang, ``Prefix-Tuning: Optimizing Continuous Prompts for Generation,'' \emph{ACL}, 2021.
+
+\bibitem{lester2021}
+B.~Lester \emph{et al.}, ``The Power of Scale for Parameter-Efficient Prompt Tuning,'' \emph{EMNLP}, 2021.
+
+\bibitem{brown1987}
+P.~Brown and S.~C.~Levinson, \emph{Politeness: Some Universals in Language Usage}, Cambridge University Press, 1987.
+
+\bibitem{verschueren1999}
+J.~Verschueren, \emph{Understanding Pragmatics}, Edward Arnold, 1999.
+
+\bibitem{biber1995}
+D.~Biber, \emph{Dimensions of Register Variation: A Cross-Linguistic Comparison}, Cambridge University Press, 1995.
+
+\end{thebibliography}
+
+\end{document}

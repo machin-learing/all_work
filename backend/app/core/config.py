@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-chat"
     lora_model_dir: str = "../finetune/output"
-    lora_base_model: str = "../finetune/models/mt5-large"
+    lora_base_model: str = "../finetune/models/mt0-large"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

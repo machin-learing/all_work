@@ -1,19 +1,20 @@
 """
-LoRA 多角色风格迁移训练。
+Train one shared role-conditioned LoRA adapter.
 
-为每个角色独立训练一个 LoRA 适配器:
-  output/boss/final/       output/colleague/final/
-  output/close_friend/final/  output/girlfriend/final/
-  output/mother/final/
+Before training, build the unified dataset:
+    python prepare_data.py
 
-使用时加载基座模型 + 对应角色的 LoRA 适配器即可。
-
-使用方法:
+Train:
     python train_lora.py
     python train_lora.py --epochs 8 --lr 1e-4 --lora-r 16 --lora-alpha 32
+
+The final adapter is saved to:
+    output/final/
 """
 
 import argparse
+import csv
+import datetime as dt
 import json
 import os
 import sys
@@ -23,20 +24,19 @@ from torch.utils.data import Dataset
 from transformers import (
     AutoModelForSeq2SeqLM,
     AutoTokenizer,
-    Seq2SeqTrainingArguments,
-    Seq2SeqTrainer,
     DataCollatorForSeq2Seq,
     EarlyStoppingCallback,
+    Seq2SeqTrainer,
+    Seq2SeqTrainingArguments,
 )
-from peft import LoraConfig, get_peft_model, TaskType
+from peft import LoraConfig, TaskType, get_peft_model
 
-# ══════════════════════════════════════════════════════════════
-MODEL_PATH = "./models/mt5-large"
-MAX_INPUT_LEN = 128
+
+MODEL_PATH = "./models/mt0-large"
+MAX_INPUT_LEN = 256
 MAX_OUTPUT_LEN = 128
 DATA_DIR = "data"
 OUTPUT_DIR = "output"
-ROLES = ["boss", "colleague", "close_friend", "girlfriend", "mother"]
 
 
 class StyleDataset(Dataset):
@@ -53,27 +53,39 @@ class StyleDataset(Dataset):
         return len(self.samples)
 
     def __getitem__(self, idx):
-        s = self.samples[idx]
-        inp = self.tokenizer(s["input"], max_length=MAX_INPUT_LEN, truncation=True, padding=False)
-        out = self.tokenizer(s["output"], max_length=MAX_OUTPUT_LEN, truncation=True, padding=False)
+        sample = self.samples[idx]
+        model_input = self.tokenizer(
+            sample["input"],
+            max_length=MAX_INPUT_LEN,
+            truncation=True,
+            padding=False,
+        )
+        model_output = self.tokenizer(
+            sample["output"],
+            max_length=MAX_OUTPUT_LEN,
+            truncation=True,
+            padding=False,
+        )
         return {
-            "input_ids": inp["input_ids"],
-            "attention_mask": inp["attention_mask"],
-            "labels": out["input_ids"],
+            "input_ids": model_input["input_ids"],
+            "attention_mask": model_input["attention_mask"],
+            "labels": model_output["input_ids"],
         }
 
 
-def load_role_datasets(role: str, data_dir: str, tokenizer):
-    role_dir = os.path.join(data_dir, role)
+def load_datasets(data_dir: str, tokenizer):
     paths = {
-        "train": os.path.join(role_dir, "train.jsonl"),
-        "val":   os.path.join(role_dir, "val.jsonl"),
-        "test":  os.path.join(role_dir, "test.jsonl"),
+        "train": os.path.join(data_dir, "train.jsonl"),
+        "val": os.path.join(data_dir, "val.jsonl"),
+        "test": os.path.join(data_dir, "test.jsonl"),
     }
-    for name, p in paths.items():
-        if not os.path.exists(p):
-            print(f"  警告: {role}/{name}.jsonl 不存在, 跳过此角色")
-            return None, None, None
+    missing = [path for path in paths.values() if not os.path.exists(path)]
+    if missing:
+        missing_text = "\n".join(missing)
+        raise FileNotFoundError(
+            "Unified dataset files are missing. Run `python prepare_data.py` first.\n"
+            f"{missing_text}"
+        )
     return (
         StyleDataset(paths["train"], tokenizer),
         StyleDataset(paths["val"], tokenizer),
@@ -81,21 +93,213 @@ def load_role_datasets(role: str, data_dir: str, tokenizer):
     )
 
 
-def train_role(role: str, args, tokenizer, device):
-    print(f"\n{'='*60}")
-    print(f"训练角色: {role}")
-    print(f"{'='*60}")
+def save_json(path: str, data) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
-    ds = load_role_datasets(role, args.data_dir, tokenizer)
-    if ds[0] is None:
+
+def save_training_config(path: str, args, dataset_sizes: dict, device: str) -> None:
+    config = {
+        "created_at": dt.datetime.now().isoformat(timespec="seconds"),
+        "command": " ".join(sys.argv),
+        "device": device,
+        "model_path": args.model_path,
+        "data_dir": args.data_dir,
+        "output_dir": args.output_dir,
+        "epochs": args.epochs,
+        "batch_size": args.batch_size,
+        "learning_rate": args.lr,
+        "max_input_len": MAX_INPUT_LEN,
+        "max_output_len": MAX_OUTPUT_LEN,
+        "lora": {
+            "r": args.lora_r,
+            "alpha": args.lora_alpha,
+            "dropout": args.lora_dropout,
+            "target_modules": ["q", "v"],
+        },
+        "dataset_sizes": dataset_sizes,
+    }
+    save_json(path, config)
+
+
+def save_loss_history(output_dir: str, log_history: list[dict]) -> None:
+    artifacts_dir = os.path.join(output_dir, "artifacts")
+    os.makedirs(artifacts_dir, exist_ok=True)
+    save_json(os.path.join(artifacts_dir, "train_log_history.json"), log_history)
+
+    csv_path = os.path.join(artifacts_dir, "loss_history.csv")
+    with open(csv_path, "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["step", "epoch", "train_loss", "eval_loss", "learning_rate"])
+        writer.writeheader()
+        for item in log_history:
+            if "loss" not in item and "eval_loss" not in item:
+                continue
+            writer.writerow(
+                {
+                    "step": item.get("step", ""),
+                    "epoch": item.get("epoch", ""),
+                    "train_loss": item.get("loss", ""),
+                    "eval_loss": item.get("eval_loss", ""),
+                    "learning_rate": item.get("learning_rate", ""),
+                }
+            )
+
+
+def plot_loss_curves(output_dir: str, log_history: list[dict]) -> None:
+    train_points = [(item.get("step"), item.get("loss")) for item in log_history if "loss" in item]
+    eval_points = [(item.get("step"), item.get("eval_loss")) for item in log_history if "eval_loss" in item]
+    if not train_points and not eval_points:
         return
-    train_ds, val_ds, test_ds = ds
-    print(f"  样本: train={len(train_ds)}, val={len(val_ds)}, test={len(test_ds)}")
 
-    # 每个角色独立加载基座模型 (避免 LoRA 权重污染)
-    print(f"  加载基座模型...")
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("matplotlib is not installed; skipped loss curve PNG generation.")
+        return
+
+    artifacts_dir = os.path.join(output_dir, "artifacts")
+    os.makedirs(artifacts_dir, exist_ok=True)
+
+    plt.figure(figsize=(8, 5))
+    if train_points:
+        xs, ys = zip(*train_points)
+        plt.plot(xs, ys, label="train loss")
+    if eval_points:
+        xs, ys = zip(*eval_points)
+        plt.plot(xs, ys, label="eval loss")
+    plt.xlabel("step")
+    plt.ylabel("loss")
+    plt.title("LoRA Fine-tuning Train/Eval Loss")
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(os.path.join(artifacts_dir, "train_eval_loss_curve.png"), dpi=160)
+    plt.close()
+
+    if eval_points:
+        xs, ys = zip(*eval_points)
+        plt.figure(figsize=(8, 5))
+        plt.plot(xs, ys, label="eval loss", color="#d62728")
+        plt.xlabel("step")
+        plt.ylabel("eval loss")
+        plt.title("LoRA Fine-tuning Eval Loss")
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(os.path.join(artifacts_dir, "eval_loss_curve.png"), dpi=160)
+        plt.close()
+
+
+def generate_test_predictions(
+    output_dir: str,
+    model,
+    tokenizer,
+    test_ds: StyleDataset,
+    device: str,
+    max_predictions: int,
+    num_beams: int,
+) -> None:
+    predictions_dir = os.path.join(output_dir, "predictions")
+    os.makedirs(predictions_dir, exist_ok=True)
+
+    total = len(test_ds) if max_predictions <= 0 else min(max_predictions, len(test_ds))
+    jsonl_path = os.path.join(predictions_dir, "test_predictions.jsonl")
+    samples_csv_path = os.path.join(predictions_dir, "comparison_samples.csv")
+
+    model.eval()
+    rows = []
+    with open(jsonl_path, "w", encoding="utf-8") as f, torch.no_grad():
+        for i in range(total):
+            encoded = test_ds[i]
+            raw = test_ds.samples[i]
+            input_ids = torch.tensor([encoded["input_ids"]]).to(device)
+            attention_mask = torch.tensor([encoded["attention_mask"]]).to(device)
+            output_ids = model.generate(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                max_length=MAX_OUTPUT_LEN,
+                num_beams=num_beams,
+            )
+            pred = tokenizer.decode(output_ids[0], skip_special_tokens=True)
+            record = {
+                "index": i,
+                "role_code": raw.get("role_code"),
+                "role_name": raw.get("role_name"),
+                "source": raw.get("source"),
+                "input": raw.get("input"),
+                "target": raw.get("output"),
+                "prediction": pred,
+            }
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            if len(rows) < 30:
+                rows.append(record)
+
+    with open(samples_csv_path, "w", encoding="utf-8-sig", newline="") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=["index", "role_name", "source", "target", "prediction"],
+        )
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(
+                {
+                    "index": row["index"],
+                    "role_name": row["role_name"],
+                    "source": row["source"],
+                    "target": row["target"],
+                    "prediction": row["prediction"],
+                }
+            )
+
+    print(f"test predictions saved: {jsonl_path}")
+    print(f"comparison samples saved: {samples_csv_path}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Train one role-conditioned LoRA adapter")
+    parser.add_argument("--model-path", default=MODEL_PATH)
+    parser.add_argument("--data-dir", default=DATA_DIR)
+    parser.add_argument("--output-dir", default=OUTPUT_DIR)
+    parser.add_argument("--epochs", type=int, default=8)
+    parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--lora-r", type=int, default=16)
+    parser.add_argument("--lora-alpha", type=int, default=32)
+    parser.add_argument("--lora-dropout", type=float, default=0.1)
+    parser.add_argument(
+        "--max-predictions",
+        type=int,
+        default=0,
+        help="Number of test predictions to save. 0 means the full test set.",
+    )
+    parser.add_argument("--prediction-beams", type=int, default=4)
+    args = parser.parse_args()
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"device: {device}")
+    print(f"base model: {args.model_path}")
+    print(f"data: {args.data_dir}")
+    print(f"LoRA r={args.lora_r} alpha={args.lora_alpha}")
+
+    tokenizer = AutoTokenizer.from_pretrained(args.model_path)
+    train_ds, val_ds, test_ds = load_datasets(args.data_dir, tokenizer)
+    print(f"samples: train={len(train_ds)}, val={len(val_ds)}, test={len(test_ds)}")
+    dataset_sizes = {"train": len(train_ds), "val": len(val_ds), "test": len(test_ds)}
+    os.makedirs(args.output_dir, exist_ok=True)
+    save_training_config(
+        os.path.join(args.output_dir, "artifacts", "config.json"),
+        args,
+        dataset_sizes,
+        device,
+    )
+    with open(os.path.join(args.output_dir, "artifacts", "train_command.txt"), "w", encoding="utf-8") as f:
+        f.write(" ".join(sys.argv) + "\n")
+
+    print("loading base model...")
     model = AutoModelForSeq2SeqLM.from_pretrained(
-        args.model_path, dtype=torch.float32,
+        args.model_path,
+        dtype=torch.float32,
     ).to(device)
 
     lora_config = LoraConfig(
@@ -106,10 +310,10 @@ def train_role(role: str, args, tokenizer, device):
         target_modules=["q", "v"],
     )
     model = get_peft_model(model, lora_config)
+    model.print_trainable_parameters()
 
-    role_output = os.path.join(args.output_dir, role)
     training_args = Seq2SeqTrainingArguments(
-        output_dir=role_output,
+        output_dir=args.output_dir,
         num_train_epochs=args.epochs,
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.batch_size,
@@ -143,69 +347,56 @@ def train_role(role: str, args, tokenizer, device):
     )
 
     trainer.train()
+    save_loss_history(args.output_dir, trainer.state.log_history)
+    plot_loss_curves(args.output_dir, trainer.state.log_history)
 
-    # 保存 LoRA 适配器
-    final_dir = os.path.join(role_output, "final")
+    final_dir = os.path.join(args.output_dir, "final")
     model.save_pretrained(final_dir)
-    print(f"  适配器已保存: {final_dir}")
+    tokenizer.save_pretrained(final_dir)
+    print(f"adapter saved: {final_dir}")
 
-    # 测试集评估
+    best_dir = os.path.join(args.output_dir, "best")
+    model.save_pretrained(best_dir)
+    tokenizer.save_pretrained(best_dir)
+    print(f"best adapter copy saved: {best_dir}")
+
     metrics = trainer.evaluate(test_ds)
-    print(f"  Test loss: {metrics.get('eval_loss', 'N/A')}")
+    metrics = {k: float(v) if isinstance(v, (int, float)) else v for k, v in metrics.items()}
+    metrics["best_model_checkpoint"] = trainer.state.best_model_checkpoint
+    metrics["best_metric"] = trainer.state.best_metric
+    save_json(os.path.join(args.output_dir, "artifacts", "test_metrics.json"), metrics)
+    print(f"test loss: {metrics.get('eval_loss', 'N/A')}")
 
-    # 推理样例
-    print(f"\n  --- {role} 推理样例 ---")
+    generate_test_predictions(
+        args.output_dir,
+        model,
+        tokenizer,
+        test_ds,
+        device,
+        args.max_predictions,
+        args.prediction_beams,
+    )
+
+    print("\n--- samples ---")
     model.eval()
     with torch.no_grad():
-        for i in range(min(3, len(test_ds))):
+        for i in range(min(5, len(test_ds))):
             sample = test_ds[i]
             input_ids = torch.tensor([sample["input_ids"]]).to(device)
             attention_mask = torch.tensor([sample["attention_mask"]]).to(device)
             output_ids = model.generate(
-                input_ids=input_ids, attention_mask=attention_mask,
-                max_length=MAX_OUTPUT_LEN, num_beams=4,
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                max_length=MAX_OUTPUT_LEN,
+                num_beams=args.prediction_beams,
             )
             inp = tokenizer.decode(sample["input_ids"], skip_special_tokens=True)
             pred = tokenizer.decode(output_ids[0], skip_special_tokens=True)
             true = tokenizer.decode(sample["labels"], skip_special_tokens=True)
-            print(f"    输入: {inp[:60]}")
-            print(f"    预测: {pred}")
-            print(f"    真值: {true}")
+            print(f"input: {inp[:100]}")
+            print(f"pred:  {pred}")
+            print(f"true:  {true}")
             print()
-
-    del model  # 释放显存
-
-
-def main():
-    parser = argparse.ArgumentParser(description="LoRA 多角色风格迁移训练")
-    parser.add_argument("--model-path", default=MODEL_PATH)
-    parser.add_argument("--data-dir", default=DATA_DIR)
-    parser.add_argument("--output-dir", default=OUTPUT_DIR)
-    parser.add_argument("--epochs", type=int, default=8)
-    parser.add_argument("--batch-size", type=int, default=4)
-    parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--lora-r", type=int, default=16)
-    parser.add_argument("--lora-alpha", type=int, default=32)
-    parser.add_argument("--lora-dropout", type=float, default=0.1)
-    parser.add_argument("--roles", default=None,
-                        help="要训练的角色, 逗号分隔 (默认全部)")
-    args = parser.parse_args()
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"设备: {device}")
-    print(f"模型: {args.model_path}")
-    print(f"数据: {args.data_dir}")
-    print(f"LoRA r={args.lora_r} alpha={args.lora_alpha}")
-
-    tokenizer = AutoTokenizer.from_pretrained(args.model_path)
-
-    roles = args.roles.split(",") if args.roles else ROLES
-    for role in roles:
-        train_role(role, args, tokenizer, device)
-
-    print(f"\n全部完成! 适配器保存在 {args.output_dir}/")
-    for role in roles:
-        print(f"  {args.output_dir}/{role}/final/")
 
 
 if __name__ == "__main__":

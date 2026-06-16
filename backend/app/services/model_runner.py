@@ -71,8 +71,43 @@ ROLES = ["boss", "colleague", "close_friend", "girlfriend", "mother"]
 LORA_BASE = settings.lora_model_dir  # e.g. "finetune/output"
 
 
+LORA_ROLE_SPECS = {
+    "boss": {
+        "name": "老板",
+        "style": "正式、礼貌、克制，强调结果和进度",
+    },
+    "colleague": {
+        "name": "同事",
+        "style": "平等协作，保留边界感",
+    },
+    "close_friend": {
+        "name": "好朋友",
+        "style": "随意、自然、直接",
+    },
+    "girlfriend": {
+        "name": "女朋友",
+        "style": "亲密、温柔、在意对方感受",
+    },
+    "mother": {
+        "name": "母亲",
+        "style": "尊重、温暖、让长辈放心",
+    },
+}
+
+
+def _build_lora_input(source_text: str, role_code: str) -> str:
+    role = LORA_ROLE_SPECS[role_code]
+    return (
+        "任务：保持原意，按目标对象改写语气。\n"
+        f"对象：{role['name']}\n"
+        f"风格：{role['style']}\n"
+        f"原句：{source_text}\n"
+        "改写："
+    )
+
+
 class LoRAInference:
-    """加载基座模型 + 5 个 LoRA 适配器, 按角色切换 (单模型 + 多适配器)。"""
+    """Load one shared role-conditioned LoRA adapter."""
 
     def __init__(self):
         import torch
@@ -87,28 +122,19 @@ class LoRAInference:
             settings.lora_base_model, dtype=torch.float32,
         ).to(self.device)
 
-        # 第一个适配器
-        first = ROLES[0]
-        first_path = os.path.join(LORA_BASE, first, "final")
+        adapter_path = os.path.join(LORA_BASE, "final")
         self.model = PeftModel.from_pretrained(
-            self.base_model, first_path, adapter_name=first
+            self.base_model, adapter_path, adapter_name="role_conditioned"
         )
-
-        # 其余适配器叠加
-        for role in ROLES[1:]:
-            path = os.path.join(LORA_BASE, role, "final")
-            self.model.load_adapter(path, adapter_name=role)
-            print(f"[LoRA] +{role}")
-
-        print(f"[LoRA] 共 {len(ROLES)} 个适配器就绪")
+        self.model.eval()
+        print(f"[LoRA] loaded shared adapter: {adapter_path}")
 
     def rewrite(self, source_text: str, role_code: str) -> str:
         if role_code not in ROLES:
             return f"[错误] 未知角色: {role_code}"
 
-        self.model.set_adapter(role_code)
-
-        inp = self.tokenizer(source_text, return_tensors="pt", max_length=128, truncation=True)
+        model_input = _build_lora_input(source_text, role_code)
+        inp = self.tokenizer(model_input, return_tensors="pt", max_length=256, truncation=True)
         inp = {k: v.to(self.device) for k, v in inp.items()}
         out = self.model.generate(**inp, max_length=128, num_beams=4)
         return self.tokenizer.decode(out[0], skip_special_tokens=True)

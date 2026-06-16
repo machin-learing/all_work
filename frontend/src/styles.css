@@ -202,6 +202,33 @@ button, input, select, textarea { font: inherit; }
   background: var(--color-surface);
 }
 
+.mode-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg);
+}
+
+.mode-tabs button {
+  width: auto;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.mode-tabs button.active {
+  background: var(--color-surface);
+  color: var(--color-primary);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+}
+
 .selector-label {
   font-size: 12px;
   color: var(--color-text-secondary);
@@ -225,6 +252,39 @@ button, input, select, textarea { font: inherit; }
 }
 
 .model-selector { margin-left: auto; }
+
+.example-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--color-border);
+  background: #fbfcff;
+  overflow-x: auto;
+}
+
+.example-row span {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.example-row button {
+  width: auto;
+  padding: 5px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.example-row button:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
 
 /* 对话区域 */
 
@@ -301,6 +361,53 @@ button, input, select, textarea { font: inherit; }
   margin-bottom: 4px;
 }
 .bubble-text { white-space: pre-wrap; }
+
+.comparison-panel {
+  width: min(980px, calc(100vw - var(--sidebar-w) - 56px));
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+}
+
+.comparison-title {
+  margin-bottom: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.comparison-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.comparison-card {
+  min-height: 108px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg);
+}
+
+.comparison-error {
+  background: #fce8e6;
+  color: var(--color-error);
+}
+
+.comparison-meta {
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-primary);
+}
+
+.comparison-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.6;
+}
 
 /* 输入区域 */
 

@@ -1,52 +1,62 @@
 """
-从 ModelScope 下载 mT5-large (国内直连, 无需代理)
+Download the default base model for LoRA fine-tuning.
 
-pip install modelscope
-python download_model.py
+Default:
+    bigscience/mt0-large -> ./models/mt0-large
+
+Usage:
+    pip install modelscope
+    python download_model.py
+
+Override:
+    python download_model.py --model-id bigscience/mt0-large --save-dir ./models/mt0-large
 """
 
 import argparse
 import shutil
 from pathlib import Path
 
-MODEL_ID = "google/mt5-large"
-SAVE_DIR = Path("./models/mt5-large")
+
+DEFAULT_MODEL_ID = "bigscience/mt0-large"
+DEFAULT_SAVE_DIR = Path("./models/mt0-large")
 
 
-def download(force=False):
-    if SAVE_DIR.exists() and list(SAVE_DIR.glob("*.json")) and not force:
-        print("模型已存在, 跳过 (--force 强制重下)")
+def download(model_id: str, save_dir: Path, force: bool = False) -> None:
+    if save_dir.exists() and list(save_dir.glob("*.json")) and not force:
+        print(f"model already exists: {save_dir}  (use --force to re-download)")
         return
 
     from modelscope import snapshot_download
 
-    SAVE_DIR.mkdir(parents=True, exist_ok=True)
+    save_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"下载 {MODEL_ID} ...")
-
+    print(f"downloading {model_id} ...")
     tmp = snapshot_download(
-        MODEL_ID,
+        model_id,
         cache_dir="./.model_tmp",
         ignore_file_pattern=["tf_model*", "flax_model*"],
     )
 
     for src in Path(tmp).iterdir():
-        dst = SAVE_DIR / src.name
+        dst = save_dir / src.name
         if src.is_dir():
-            if not dst.exists():
-                shutil.copytree(str(src), str(dst))
+            if dst.exists():
+                continue
+            shutil.copytree(str(src), str(dst))
         else:
             shutil.copy2(str(src), str(dst))
 
     shutil.rmtree("./.model_tmp", ignore_errors=True)
-    print(f"完成 → {SAVE_DIR.resolve()}")
+    print(f"done -> {save_dir.resolve()}")
 
 
-def main():
-    p = argparse.ArgumentParser()
-    p.add_argument("--force", action="store_true")
-    args = p.parse_args()
-    download(args.force)
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model-id", default=DEFAULT_MODEL_ID)
+    parser.add_argument("--save-dir", default=str(DEFAULT_SAVE_DIR))
+    parser.add_argument("--force", action="store_true")
+    args = parser.parse_args()
+    download(args.model_id, Path(args.save_dir), args.force)
 
 
 if __name__ == "__main__":

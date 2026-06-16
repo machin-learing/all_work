@@ -11,4 +11,16 @@ finetune/.model_tmp/
 backend/.env
 __pycache__/
 *.pyc
+frontend/node_modules/
+frontend/dist/
+node_modules/
+dist/
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz
+科研实训例子/
+.claude/
+.vscode/
 .DS_Store

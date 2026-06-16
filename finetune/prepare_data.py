@@ -1,35 +1,82 @@
 """
-将 LLM 改写结果按角色拆分为独立的训练数据。
+Build one shared role-conditioned LoRA dataset.
 
-输入:  dataset/lccc_data/role_rewrite_all.jsonl
-输出:  data/boss/train.jsonl val.jsonl test.jsonl
-      data/colleague/...
-      data/close_friend/...
-      data/girlfriend/...
-      data/mother/...
+Input:
+    ../dataset/lccc_data/role_rewrite_filtered.jsonl
 
-每个角色的数据格式: {"input": "中性文本", "output": "角色改写文本"}
+Output:
+    data/train.jsonl
+    data/val.jsonl
+    data/test.jsonl
 
-使用方法:
-    python prepare_data.py
-    python prepare_data.py --input ../dataset/lccc_data/role_rewrite_all.jsonl
+Each output sample uses a short instruction format for mT0:
+    任务：保持原意，按目标对象改写语气。
+    对象：老板
+    风格：正式、礼貌、克制
+    原句：我今天加班，可能晚点回去
+    改写：
 """
 
 import argparse
 import json
-import os
 import random
 import sys
-from collections import Counter
 from pathlib import Path
 
-ROLES = ["boss", "colleague", "close_friend", "girlfriend", "mother"]
+
+ROLE_SPECS = {
+    "boss": {
+        "name": "老板",
+        "style": "正式、礼貌、克制，强调结果和进度",
+    },
+    "colleague": {
+        "name": "同事",
+        "style": "平等协作，保留边界感",
+    },
+    "close_friend": {
+        "name": "好朋友",
+        "style": "随意、自然、直接",
+    },
+    "girlfriend": {
+        "name": "女朋友",
+        "style": "亲密、温柔、在意对方感受",
+    },
+    "mother": {
+        "name": "母亲",
+        "style": "尊重、温暖、让长辈放心",
+    },
+}
+
+ROLES = list(ROLE_SPECS)
 
 
-def main():
-    parser = argparse.ArgumentParser(description="按角色拆分训练数据")
-    parser.add_argument("--input", "-i",
-                        default="../dataset/lccc_data/role_rewrite_all.jsonl")
+def build_model_input(source_text: str, role_code: str) -> str:
+    role = ROLE_SPECS[role_code]
+    return (
+        "任务：保持原意，按目标对象改写语气。\n"
+        f"对象：{role['name']}\n"
+        f"风格：{role['style']}\n"
+        f"原句：{source_text}\n"
+        "改写："
+    )
+
+
+def parse_split(split: str) -> tuple[float, float, float]:
+    parts = [int(x) for x in split.split(":")]
+    if len(parts) != 3 or sum(parts) <= 0:
+        raise ValueError("--split must look like 8:1:1")
+    total = sum(parts)
+    return parts[0] / total, parts[1] / total, parts[2] / total
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Build one role-conditioned LoRA dataset")
+    parser.add_argument(
+        "--input",
+        "-i",
+        default="../dataset/lccc_data/role_rewrite_filtered.jsonl",
+        help="Filtered role rewrite JSONL",
+    )
     parser.add_argument("--output-dir", "-o", default="data")
     parser.add_argument("--split", default="8:1:1")
     parser.add_argument("--seed", type=int, default=42)
@@ -37,69 +84,64 @@ def main():
 
     input_path = Path(args.input)
     if not input_path.exists():
-        print(f"错误: 文件不存在: {input_path}")
+        print(f"Error: input file does not exist: {input_path}")
         sys.exit(1)
 
-    parts = [int(x) for x in args.split.split(":")]
-    total = sum(parts)
-    train_r, val_r, test_r = parts[0] / total, parts[1] / total, parts[2] / total
+    train_r, val_r, test_r = parse_split(args.split)
 
-    # 加载
-    items = []
-    with open(input_path, "r", encoding="utf-8") as f:
+    samples = []
+    dropped = 0
+    with input_path.open("r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
-            if line:
-                items.append(json.loads(line))
-
-    # 按角色分组
-    role_samples = {r: [] for r in ROLES}
-    dropped = 0
-
-    for item in items:
-        rewrites = item.get("rewrites", {})
-        for role in ROLES:
-            val = rewrites.get(role, "")
-            if val == "N/A" or not val:
-                dropped += 1
+            if not line:
                 continue
-            role_samples[role].append({
-                "input": item["neutral"],
-                "output": val,
-            })
+            item = json.loads(line)
+            source_text = item.get("neutral", "").strip()
+            rewrites = item.get("rewrites", {})
+            if not source_text:
+                continue
 
-    # 每个角色各自打乱 & 划分
+            for role_code in ROLES:
+                rewritten = str(rewrites.get(role_code, "")).strip()
+                if not rewritten or rewritten == "N/A":
+                    dropped += 1
+                    continue
+                samples.append(
+                    {
+                        "role_code": role_code,
+                        "role_name": ROLE_SPECS[role_code]["name"],
+                        "source": source_text,
+                        "input": build_model_input(source_text, role_code),
+                        "output": rewritten,
+                    }
+                )
+
     random.seed(args.seed)
+    random.shuffle(samples)
+
+    n = len(samples)
+    n_train = int(n * train_r)
+    n_val = int(n * val_r)
+    splits = {
+        "train": samples[:n_train],
+        "val": samples[n_train:n_train + n_val],
+    }
+    if test_r > 0:
+        splits["test"] = samples[n_train + n_val:]
+
     output_dir = Path(args.output_dir)
-    total_samples = 0
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    for role in ROLES:
-        samples = role_samples[role]
-        random.shuffle(samples)
-        n = len(samples)
-        total_samples += n
-        n_train, n_val = int(n * train_r), int(n * val_r)
+    for name, split_samples in splits.items():
+        path = output_dir / f"{name}.jsonl"
+        with path.open("w", encoding="utf-8") as f:
+            for sample in split_samples:
+                f.write(json.dumps(sample, ensure_ascii=False) + "\n")
+        print(f"{name}: {len(split_samples)} -> {path}")
 
-        splits = {
-            "train": samples[:n_train],
-            "val": samples[n_train:n_train + n_val],
-        }
-        if test_r > 0:
-            splits["test"] = samples[n_train + n_val:]
-
-        role_dir = output_dir / role
-        role_dir.mkdir(parents=True, exist_ok=True)
-
-        for name, data in splits.items():
-            path = role_dir / f"{name}.jsonl"
-            with open(path, "w", encoding="utf-8") as f:
-                for s in data:
-                    f.write(json.dumps(s, ensure_ascii=False) + "\n")
-
-        print(f"  {role}: train={len(splits['train'])}, val={len(splits['val'])}, test={len(splits.get('test', []))} → {role_dir}")
-
-    print(f"\n总样本: {total_samples}  |  丢弃 N/A: {dropped}")
-    print("完成!")
+    print(f"total samples: {n}")
+    print(f"dropped N/A or empty rewrites: {dropped}")
 
 
 if __name__ == "__main__":
