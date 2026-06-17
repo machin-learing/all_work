@@ -4,6 +4,9 @@
 *.pth
 *.safetensors
 *.ckpt
+.env
+.env.*
+!.env.example
 dataset/lccc_data/
 finetune/models/
 finetune/output/

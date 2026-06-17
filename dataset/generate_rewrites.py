@@ -34,17 +34,32 @@ import requests
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_MODEL = "deepseek-chat"
+DEEPSEEK_API_KEY_ENV = "DEEPSEEK_API_KEY"
 
-# ============================================================
-# 在这里粘贴你的 DeepSeek API Key (sk-xxx)
-# ============================================================
-DEEPSEEK_API_KEY = "sk-e3718cdf728d444eb7ce25e21a588320"
+
+def load_dotenv(path: str = ".env") -> None:
+    """Load simple KEY=VALUE pairs from .env without overriding the environment."""
+    if not os.path.exists(path):
+        return
+
+    with open(path, "r", encoding="utf-8") as f:
+        for raw_line in f:
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = value
 
 
 def load_api_key() -> str:
-    if DEEPSEEK_API_KEY and DEEPSEEK_API_KEY != "your-api-key-here":
-        return DEEPSEEK_API_KEY
-    print("错误: 请在脚本顶部 DEEPSEEK_API_KEY 变量中填入你的 DeepSeek API Key")
+    load_dotenv()
+    api_key = os.environ.get(DEEPSEEK_API_KEY_ENV, "").strip()
+    if api_key:
+        return api_key
+    print("错误: 请在环境变量或项目根目录 .env 中设置 DEEPSEEK_API_KEY")
     sys.exit(1)
 
 
@@ -556,7 +571,7 @@ def main():
     parser.add_argument("--split", default="8:1:1",
                         help="训练/验证/测试分割比例 (默认: 8:1:1)")
     parser.add_argument("--api-key", "-k", default=None,
-                        help="千帆 API Key (也可用环境变量 QIANFAN_API_KEY 或 .apikey 文件)")
+                        help="DeepSeek API Key (也可用环境变量或 .env 中的 DEEPSEEK_API_KEY)")
     args = parser.parse_args()
 
     if args.output_dir is None:
