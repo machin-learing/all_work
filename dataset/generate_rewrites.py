@@ -35,9 +35,11 @@ import requests
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_MODEL = "deepseek-chat"
 DEEPSEEK_API_KEY_ENV = "DEEPSEEK_API_KEY"
+DATASET_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_ENV_PATH = os.path.join(DATASET_DIR, ".env")
 
 
-def load_dotenv(path: str = ".env") -> None:
+def load_dotenv(path: str = DEFAULT_ENV_PATH) -> None:
     """Load simple KEY=VALUE pairs from .env without overriding the environment."""
     if not os.path.exists(path):
         return
@@ -59,7 +61,7 @@ def load_api_key() -> str:
     api_key = os.environ.get(DEEPSEEK_API_KEY_ENV, "").strip()
     if api_key:
         return api_key
-    print("错误: 请在环境变量或项目根目录 .env 中设置 DEEPSEEK_API_KEY")
+    print("错误: 请在环境变量或 dataset/.env 中设置 DEEPSEEK_API_KEY")
     sys.exit(1)
 
 
@@ -330,6 +332,7 @@ def run_pipeline(
     api_key: str | None = None,
 ):
     # 加载 API Key
+    load_dotenv()
     if api_key is None:
         api_key = load_api_key()
     if not api_key:
