@@ -1,4 +1,4 @@
-% !TeX program = xelatex
+﻿% !TeX program = xelatex
 \documentclass[12pt,a4paper]{ctexart}
 
 \usepackage[margin=2.5cm]{geometry}
@@ -200,15 +200,15 @@ LCCC 的优势在于规模较大、表达自然、口语化程度高；不足在
 
 \subsection{T5 与文本到文本范式}
 
-T5 将各种自然语言处理任务统一为文本到文本格式，即输入和输出都是字符串。这种范式适合风格迁移任务，因为改写本质上就是从源文本生成目标文本。原始 T5 主要面向英文语料，在中文任务上能力有限，因此中文或多语言场景通常采用 mT5、mBART、Chinese-T5 等模型。
+T5~\cite{raffel2020t5} 将各种自然语言处理任务统一为文本到文本格式，即输入和输出都是字符串。这种范式适合风格迁移任务，因为改写本质上就是从源文本生成目标文本。原始 T5 主要面向英文语料，在中文任务上能力有限，因此中文或多语言场景通常采用 mT5、mBART、Chinese-T5 等模型。
 
 \subsection{mT5}
 
-mT5 是大规模多语言文本到文本预训练模型，覆盖包括中文在内的大量语言。它继承了 T5 的 Seq2Seq 架构，可用于翻译、摘要、问答和改写等任务。对于中文风格迁移，mT5 的优势在于具备多语言生成能力；不足在于它本身并未专门接受指令式任务训练，对“任务、对象、风格、原句、改写”这类字段的理解主要依赖下游微调数据。
+mT5~\cite{xue2021mt5} 是大规模多语言文本到文本预训练模型，覆盖包括中文在内的101种语言。它继承了 T5 的 Seq2Seq 架构，在 mC4 多语言语料上预训练，可用于翻译、摘要、问答和改写等任务。对于中文风格迁移，mT5 的优势在于具备多语言生成能力；不足在于它本身并未专门接受指令式任务训练，对“任务、对象、风格、原句、改写”这类字段的理解主要依赖下游微调数据。
 
 \subsection{mT0}
 
-mT0 可以看作在 mT5 基础上进行多任务指令微调后的模型。它在大量指令式任务上训练，因此更适合处理自然语言任务描述。例如：
+mT0~\cite{sanh2022mt0} 可以看作在 mT5 基础上进行多任务指令微调后的模型，在 xP3 多语言指令数据集上训练，覆盖46种语言和多种任务类型。Sanh 等人证明，经过多任务提示训练后，模型能够在完全未见过的任务上实现零样本泛化，且英文任务的泛化能力可迁移至其他语言。这一特性对本项目尤为关键：mT0 不需要重新学习“按照指令改写文本”这一基础能力，可以更专注于学习中文场景下的角色风格差异。例如：
 
 \begin{lstlisting}[language={}]
 任务：保持原意，按目标对象改写语气。
@@ -220,6 +220,43 @@ mT0 可以看作在 mT5 基础上进行多任务指令微调后的模型。它�
 
 对于本项目而言，mT0 的优势在于它更容易利用输入中的“任务”和“风格”字段，在小样本条件下比纯 mT5 更适合作为基座模型。需要注意的是，mT0 仍然不是对话式大模型，它对具体角色语气的掌握仍取决于微调数据质量。因此，本项目采用“短指令模板+角色风格词+LoRA 微调”的方式，将 mT0 的指令理解能力和本项目数据结合起来。
 
+\subsection{指令微调范式的启发}
+
+指令微调（Instruction Tuning）通过在多样化任务指令上训练模型，显著提升了语言模型对自然语言任务描述的泛化能力。FLAN~\cite{wei2022flan} 首次系统证明了这一点：在62个任务集群上做指令微调后，模型在未见任务上的零样本性能大幅提升。后续工作~\cite{chung2022scaling} 进一步探索了指令微调的规模化规律，发现更大的基座模型、更多的任务簇和思维链数据能够产生更强的泛化能力。
+
+这一范式对本项目有三层启发：
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{指令模板即任务定义：} 本项目将“关系角色风格迁移”定义为一条自然语言指令（“任务：保持原意，按目标对象改写语气”），而非设计专门的模型结构或损失函数。这种方法利用了 mT0 在多语言指令微调中获得的任务泛化能力，使角色条件控制完全通过输入字段实现。
+  \item \textbf{少样本泛化潜力：} FLAN 研究表明指令微调模型在少样本设置下显著优于纯预训练模型。在本项目中，每个角色仅有数百条训练样本，mT0 的指令遵循能力可以弥补数据量的不足，降低对大规模平行数据的依赖。
+  \item \textbf{规模与性能的权衡：} Chung 等人指出指令微调的收益随模型规模递增。本项目选择 mT0-large（约1.2B参数）而非更小的 mT0-base，正是为了在单卡可训练的前提下尽可能保留指令泛化能力。
+\end{enumerate}
+
+\begin{table}[H]
+\centering
+\caption{基座模型路线对比}
+\label{tab:model_comparison}
+\begin{tabular}{p{2.3cm}|p{3.2cm}|p{3.2cm}|p{3.5cm}}
+\toprule
+维度 & mT5-large & mT0-large & 本项目选择理由 \\
+\midrule
+预训练语料 & mC4 多语言语料 & mC4 + xP3 指令数据 & 指令数据赋予任务理解能力 \\
+\midrule
+中文生成能力 & 中等（多语言共享参数） & 中等偏上（指令增强泛化） & 指令格式有助于中文风格字段解析 \\
+\midrule
+指令遵循能力 & 弱（依赖下游数据归纳） & 较强（预训练获得） & 小样本条件下指令能力决定任务适配上限 \\
+\midrule
+少样本改写效果 & 需较多样本微调 & 零/少样本即可调整 & 每个角色仅数百样本时 mT0 更稳定 \\
+\midrule
+参数规模 & 约738M & 约1.2B & mT0-large 在单卡+LoRA 下仍可训练 \\
+\midrule
+角色条件控制 & 需设计专用格式 & 天然适配指令模板 & 对象/风格字段可嵌入输入模板 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+如表~\ref{tab:model_comparison} 所示，mT0-large 在指令遵循和少样本改写两方面优于 mT5-large。虽然 mT0 的参数规模更大（约1.2B），但配合 LoRA 参数高效微调后，单张24GB显存的消费级 GPU 即可完成训练。此外，mT0 内置的指令理解能力使其能够区分“老板”的正式克制、“女朋友”的亲密安抚和“母亲”的尊重温暖，这些角色差异通过输入模板中的“对象”和“风格”字段传达，而非依赖模型自行从数据中归纳。这一选择背后的技术逻辑是：在小样本条件下，模型已有的结构化输入理解能力比从零学习更可靠。
+
 \section{参数高效微调技术}
 
 \subsection{全量微调的局限}
@@ -228,13 +265,13 @@ mT0 可以看作在 mT5 基础上进行多任务指令微调后的模型。它�
 
 \subsection{Adapter、Prefix-Tuning 与 Prompt-Tuning}
 
-Adapter 方法在 Transformer 层中插入小型可训练模块，只更新这些模块参数；Prefix-Tuning 和 Prompt-Tuning 则通过学习连续前缀或软提示来控制生成。这些方法都属于参数高效微调，核心目标是在冻结大部分预训练参数的情况下适配下游任务。
+Adapter 方法~\cite{houlsby2019} 在 Transformer 层中插入小型可训练模块（通常为两层前馈网络加非线性激活），只更新这些模块参数，而保持预训练参数不变。Prefix-Tuning~\cite{li2021prefix} 在输入序列前添加可学习的连续向量（前缀），通过优化这些前缀来控制生成行为。Prompt-Tuning~\cite{lester2021} 则进一步简化，仅学习少量软提示嵌入向量，在模型规模足够大时能达到与全量微调相近的效果。这些方法都属于参数高效微调（Parameter-Efficient Fine-Tuning, PEFT），核心目标是在冻结大部分预训练参数的情况下适配下游任务，显著降低训练和部署成本。
 
-这些方法的共同优势是训练成本低、部署灵活；不足是表达能力可能受限，且不同方法对任务格式和模型结构较敏感。
+这些方法的共同优势是训练成本低、部署灵活，每个任务只需保存少量参数。但也存在不足：Adapter 的串行插入会增加推理延迟；Prefix-Tuning 和 Prompt-Tuning 对任务格式和模型规模较敏感，在中等规模模型上的效果可能不够稳定。
 
 \subsection{LoRA}
 
-LoRA 通过低秩矩阵分解建模权重增量，不直接修改原始权重。设原模型权重为 $W$，LoRA 学习：
+LoRA（Low-Rank Adaptation）~\cite{hu2022lora} 通过低秩矩阵分解建模权重增量，不直接修改原始权重。设原模型权重为 $W$，LoRA 学习：
 
 \[
 \Delta W = BA
@@ -254,11 +291,23 @@ LoRA 通过低秩矩阵分解建模权重增量，不直接修改原始权重。
 对于多角色风格迁移，可以有两种方案：
 
 \begin{enumerate}[leftmargin=2em]
-  \item \textbf{多 LoRA：} 每个角色训练一个适配器，推理时按角色切换。
-  \item \textbf{单 LoRA：} 所有角色共享一个适配器，输入中显式加入角色条件。
+  \item \textbf{多 LoRA：} 每个角色训练一个独立的 LoRA 适配器，推理时按角色切换对应的适配器权重。
+  \item \textbf{单 LoRA：} 所有角色共享一个 LoRA 适配器，输入中显式加入角色条件（“对象”和“风格”字段）。
 \end{enumerate}
 
-多 LoRA 结构清晰，但在小样本条件下每个适配器可用数据较少，容易学到角色模板。单 LoRA 则能共享所有角色数据，使模型共同学习语义保持、句式重组和中文自然表达，再由“对象”和“风格”字段控制输出。因此，本项目最终采用 mT0-large + 单 LoRA 的方案。
+多 LoRA 结构清晰直观，每个适配器专注于单一角色的风格特征，理论上可以学到更精准的角色表达。然而，其实际局限性在小样本条件下尤为突出：
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{数据稀疏：} 每个 LoRA 适配器只能使用对应角色的训练数据，样本量不足时容易过拟合到表面模板（如对所有“老板”改写只加“领导”一词），而非学习真实的风格差异。
+  \item \textbf{管理复杂：} 五个角色需要维护五组 LoRA 权重，部署时需要额外的切换逻辑和存储空间。
+  \item \textbf{知识割裂：} 不同角色的 LoRA 各自独立训练，无法共享语义保持、中文自然表达等通用能力，可能出现同一个原句在不同角色下语义不一致的问题。
+\end{itemize}
+
+单 LoRA 方案则能克服上述局限：所有角色数据共同训练一个适配器，使模型在“保持语义→根据对象调整表达”这一复合能力上获得更多训练信号。角色区分通过输入中的“对象”和“风格”字段实现——这正是 mT0 擅长的指令遵循能力。
+
+此外，Pfeiffer 等人~\cite{pfeiffer2021adapterfusion} 在 AdapterFusion 中指出，多个独立适配器的简单切换存在知识干扰问题：不同适配器学到的是该任务的专用解，组合时可能冲突。AdapterFusion 提出了通过注意力机制融合多个适配器的方法，但这也意味着额外的训练和推理复杂度。这一发现为本项目选择单 LoRA 方案提供了参考：与其为五个角色维护和融合多个适配器，不如让模型通过一个共享适配器学习“条件生成”能力，由输入中的角色字段控制输出。
+
+因此，本项目最终采用 mT0-large + 单 LoRA 的方案。这一选择的本质逻辑是：在小样本条件下，让模型学习“根据输入条件生成合适表达”这一通用能力，比让模型为每个角色单独学习一套表达规则更为可靠和高效。实际训练中 LoRA rank 设为 16、alpha 设为 32，在约5,000条训练样本上训练3-8个 epoch，可训练参数仅占模型总参数的约0.2\%。
 
 \section{语用学与关系感知生成}
 
@@ -331,50 +380,99 @@ Brown 和 Levinson 的礼貌理论指出，语言表达会受到权力差（Powe
 
 \begin{thebibliography}{99}
 
-\bibitem{rao2018gyafc}
-S.~Rao and J.~Tetreault, ``Dear Sir or Madam, May I Introduce the GYAFC Dataset,'' \emph{NAACL}, 2018.
+\bibitem{raffel2020t5}
+C.~Raffel \emph{et al.}, ``Exploring the Limits of Transfer Learning with a Unified Text-to-Text Transformer,''\ \emph{JMLR}, 2020.
 
-\bibitem{fu2018style}
-Z.~Fu \emph{et al.}, ``Style Transfer in Text: Exploration and Evaluation,'' \emph{AAAI}, 2018.
 
-\bibitem{shen2017}
-T.~Shen \emph{et al.}, ``Style Transfer from Non-Parallel Text by Cross-Alignment,'' \emph{NeurIPS}, 2017.
-
-\bibitem{john2019}
-V.~John \emph{et al.}, ``Disentangled Representation Learning for Non-Parallel Text Style Transfer,'' \emph{ACL}, 2019.
-
-\bibitem{reif2022}
-E.~Reif \emph{et al.}, ``A Recipe for Arbitrary Text Style Transfer with Large Language Models,'' \emph{ACL}, 2022.
-
-\bibitem{wang2020lccc}
-Y.~Wang \emph{et al.}, ``A Large-Scale Chinese Short-Text Conversation Dataset,'' \emph{NLPCC}, 2020.
 
 \bibitem{xue2021mt5}
 L.~Xue \emph{et al.}, ``mT5: A Massively Multilingual Pre-trained Text-to-Text Transformer,'' \emph{NAACL}, 2021.
 
+
+
 \bibitem{sanh2022mt0}
 V.~Sanh \emph{et al.}, ``Multitask Prompted Training Enables Zero-Shot Task Generalization,'' \emph{ICLR}, 2022.
 
-\bibitem{hu2022lora}
-E.~J.~Hu \emph{et al.}, ``LoRA: Low-Rank Adaptation of Large Language Models,'' \emph{ICLR}, 2022.
+
+
+\bibitem{wei2022flan}
+J.~Wei \emph{et al.}, ``Finetuned Language Models Are Zero-Shot Learners,''\ \emph{ICLR}, 2022.
+
+
+
+\bibitem{chung2022scaling}
+H.~W.~Chung \emph{et al.}, ``Scaling Instruction-Finetuned Language Models,''\ \emph{JMLR}, 2024.
+
+
 
 \bibitem{houlsby2019}
 N.~Houlsby \emph{et al.}, ``Parameter-Efficient Transfer Learning for NLP,'' \emph{ICML}, 2019.
 
+
+
 \bibitem{li2021prefix}
 X.~L.~Li and P.~Liang, ``Prefix-Tuning: Optimizing Continuous Prompts for Generation,'' \emph{ACL}, 2021.
+
+
 
 \bibitem{lester2021}
 B.~Lester \emph{et al.}, ``The Power of Scale for Parameter-Efficient Prompt Tuning,'' \emph{EMNLP}, 2021.
 
+
+
+\bibitem{hu2022lora}
+E.~J.~Hu \emph{et al.}, ``LoRA: Low-Rank Adaptation of Large Language Models,'' \emph{ICLR}, 2022.
+
+
+
+\bibitem{pfeiffer2021adapterfusion}
+J.~Pfeiffer \emph{et al.}, ``AdapterFusion: Non-Destructive Task Composition for Transfer Learning,''\ \emph{EACL}, 2021.
+
+
+
+\bibitem{rao2018gyafc}
+S.~Rao and J.~Tetreault, ``Dear Sir or Madam, May I Introduce the GYAFC Dataset,'' \emph{NAACL}, 2018.
+
+
+
+\bibitem{fu2018style}
+Z.~Fu \emph{et al.}, ``Style Transfer in Text: Exploration and Evaluation,'' \emph{AAAI}, 2018.
+
+
+
+\bibitem{shen2017}
+T.~Shen \emph{et al.}, ``Style Transfer from Non-Parallel Text by Cross-Alignment,'' \emph{NeurIPS}, 2017.
+
+
+
+\bibitem{john2019}
+V.~John \emph{et al.}, ``Disentangled Representation Learning for Non-Parallel Text Style Transfer,'' \emph{ACL}, 2019.
+
+
+
+\bibitem{reif2022}
+E.~Reif \emph{et al.}, ``A Recipe for Arbitrary Text Style Transfer with Large Language Models,'' \emph{ACL}, 2022.
+
+
+
+\bibitem{wang2020lccc}
+Y.~Wang \emph{et al.}, ``A Large-Scale Chinese Short-Text Conversation Dataset,'' \emph{NLPCC}, 2020.
+
+
+
 \bibitem{brown1987}
 P.~Brown and S.~C.~Levinson, \emph{Politeness: Some Universals in Language Usage}, Cambridge University Press, 1987.
+
+
 
 \bibitem{verschueren1999}
 J.~Verschueren, \emph{Understanding Pragmatics}, Edward Arnold, 1999.
 
+
+
 \bibitem{biber1995}
 D.~Biber, \emph{Dimensions of Register Variation: A Cross-Linguistic Comparison}, Cambridge University Press, 1995.
+
 
 \end{thebibliography}
 
