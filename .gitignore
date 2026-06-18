@@ -9,7 +9,9 @@
 !.env.example
 dataset/lccc_data/
 finetune/models/
-finetune/output/
+finetune/output/*
+!finetune/output/final/
+!finetune/output/final/**
 finetune/.model_tmp/
 backend/.env
 __pycache__/
@@ -28,3 +30,4 @@ dist/
 .vscode/
 .DS_Store
 project_todo.md
+!finetune/output/final/*.safetensors

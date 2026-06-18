@@ -3,7 +3,7 @@
 
 支持的模型:
   - deepseek_api:    真实调用 DeepSeek API
-  - lora_finetuned:  5 个 LoRA 适配器 (每个角色一个)
+  - lora_finetuned:  共享单 LoRA 适配器，通过角色条件输入控制风格
   - transformer_scratch:  占位符
 """
 
@@ -115,11 +115,14 @@ class LoRAInference:
         from peft import PeftModel
 
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.torch = torch
+        self.dtype = self._resolve_dtype(torch)
         self.tokenizer = AutoTokenizer.from_pretrained(settings.lora_base_model)
 
-        print(f"[LoRA] 加载基座模型 ...")
+        print(f"[LoRA] loading base model on {self.device}, precision={self.dtype}")
         self.base_model = AutoModelForSeq2SeqLM.from_pretrained(
-            settings.lora_base_model, dtype=torch.float32,
+            settings.lora_base_model,
+            torch_dtype=self.dtype,
         ).to(self.device)
 
         adapter_path = os.path.join(LORA_BASE, "final")
@@ -129,6 +132,20 @@ class LoRAInference:
         self.model.eval()
         print(f"[LoRA] loaded shared adapter: {adapter_path}")
 
+    def _resolve_dtype(self, torch):
+        if self.device != "cuda":
+            return torch.float32
+
+        precision = settings.lora_precision.lower()
+        if precision == "bf16":
+            if torch.cuda.is_bf16_supported():
+                return torch.bfloat16
+            print("[LoRA] bf16 is not supported on this GPU; falling back to fp16.")
+            return torch.float16
+        if precision == "fp32":
+            return torch.float32
+        return torch.float16
+
     def rewrite(self, source_text: str, role_code: str) -> str:
         if role_code not in ROLES:
             return f"[错误] 未知角色: {role_code}"
@@ -136,7 +153,8 @@ class LoRAInference:
         model_input = _build_lora_input(source_text, role_code)
         inp = self.tokenizer(model_input, return_tensors="pt", max_length=256, truncation=True)
         inp = {k: v.to(self.device) for k, v in inp.items()}
-        out = self.model.generate(**inp, max_length=128, num_beams=4)
+        with self.torch.inference_mode():
+            out = self.model.generate(**inp, max_length=128, num_beams=4)
         return self.tokenizer.decode(out[0], skip_special_tokens=True)
 
 

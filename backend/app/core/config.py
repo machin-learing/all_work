@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     deepseek_model: str = "deepseek-chat"
     lora_model_dir: str = "../finetune/output"
     lora_base_model: str = "../finetune/models/mt0-large"
+    lora_precision: str = "fp16"
 
     model_config = SettingsConfigDict(env_file=BACKEND_DIR / ".env", env_file_encoding="utf-8")
 
