@@ -53,6 +53,9 @@ async function loadRecords() {
 async function loadAcceptedSamples() {
   const { data } = await http.get('/accepted-samples')
   acceptedSamples.value = data
+  Object.keys(acceptedMap).forEach(key => {
+    delete acceptedMap[key]
+  })
   data.forEach(sample => {
     acceptedMap[sample.transfer_id] = true
   })
@@ -206,6 +209,7 @@ async function submitRewrite() {
 
 async function acceptSample(item) {
   if (!item.transfer_id || acceptedMap[item.transfer_id]) return
+  item.acceptError = ''
   try {
     const { data } = await http.post('/accepted-samples', {
       transfer_id: item.transfer_id
@@ -353,69 +357,71 @@ onMounted(async () => {
         </div>
 
         <template v-if="!showAcceptedSamples">
-        <div
-          v-for="(msg, idx) in chatMessages"
-          :key="idx"
-          class="message-row"
-          :class="msg.type === 'user' ? 'message-right' : 'message-left'"
-        >
-          <template v-if="msg.type === 'comparison'">
-            <div class="comparison-panel">
-              <div class="comparison-title">{{ msg.title }}</div>
-              <div class="comparison-grid">
-                <div
-                  v-for="(item, itemIdx) in msg.results"
-                  :key="itemIdx"
-                  class="comparison-card"
-                  :class="{ 'comparison-error': item.isError }"
-                >
-                  <div class="comparison-meta">
-                    {{ roleLabel(item.role_code) }} · {{ modelLabel(item.model_code) }}
-                  </div>
-                  <div class="comparison-text">{{ item.text }}</div>
-                  <button
-                    v-if="!item.isError"
-                    class="accept-btn"
-                    :disabled="acceptedMap[item.transfer_id]"
-                    @click="acceptSample(item)"
+          <div
+            v-for="(msg, idx) in chatMessages"
+            :key="idx"
+            class="message-row"
+            :class="msg.type === 'user' ? 'message-right' : 'message-left'"
+          >
+            <template v-if="msg.type === 'comparison'">
+              <div class="comparison-panel">
+                <div class="comparison-title">{{ msg.title }}</div>
+                <div class="comparison-grid">
+                  <div
+                    v-for="(item, itemIdx) in msg.results"
+                    :key="itemIdx"
+                    class="comparison-card"
+                    :class="{ 'comparison-error': item.isError }"
                   >
-                    {{ acceptedMap[item.transfer_id] ? '已采纳' : '采纳' }}
-                  </button>
+                    <div class="comparison-meta">
+                      {{ roleLabel(item.role_code) }} · {{ modelLabel(item.model_code) }}
+                    </div>
+                    <div class="comparison-text">{{ item.text }}</div>
+                    <button
+                      v-if="!item.isError"
+                      class="accept-btn"
+                      :disabled="acceptedMap[item.transfer_id]"
+                      @click="acceptSample(item)"
+                    >
+                      {{ acceptedMap[item.transfer_id] ? '已采纳' : '采纳' }}
+                    </button>
+                    <div v-if="item.acceptError" class="accept-error">{{ item.acceptError }}</div>
+                  </div>
                 </div>
               </div>
-            </div>
-          </template>
+            </template>
 
-          <template v-else>
-            <div v-if="msg.type === 'model'" class="avatar model-avatar">
-              {{ roleLabel(msg.role_code)?.[0] || 'M' }}
-            </div>
-            <div
-              class="bubble"
-              :class="{
-                'bubble-user': msg.type === 'user',
-                'bubble-model': msg.type === 'model',
-                'bubble-error': msg.isError
-              }"
-            >
-              <div v-if="msg.type === 'model'" class="bubble-meta">
-                {{ roleLabel(msg.role_code) }} · {{ modelLabel(msg.model_code) }}
+            <template v-else>
+              <div v-if="msg.type === 'model'" class="avatar model-avatar">
+                {{ roleLabel(msg.role_code)?.[0] || 'M' }}
               </div>
-              <div class="bubble-text">{{ msg.text }}</div>
-              <button
-                v-if="msg.type === 'model' && !msg.isError"
-                class="accept-btn"
-                :disabled="acceptedMap[msg.transfer_id]"
-                @click="acceptSample(msg)"
+              <div
+                class="bubble"
+                :class="{
+                  'bubble-user': msg.type === 'user',
+                  'bubble-model': msg.type === 'model',
+                  'bubble-error': msg.isError
+                }"
               >
-                {{ acceptedMap[msg.transfer_id] ? '已采纳' : '采纳' }}
-              </button>
-            </div>
-            <div v-if="msg.type === 'user'" class="avatar user-avatar">
-              {{ authStore.profile?.full_name?.[0] || 'U' }}
-            </div>
-          </template>
-        </div>
+                <div v-if="msg.type === 'model'" class="bubble-meta">
+                  {{ roleLabel(msg.role_code) }} · {{ modelLabel(msg.model_code) }}
+                </div>
+                <div class="bubble-text">{{ msg.text }}</div>
+                <button
+                  v-if="msg.type === 'model' && !msg.isError"
+                  class="accept-btn"
+                  :disabled="acceptedMap[msg.transfer_id]"
+                  @click="acceptSample(msg)"
+                >
+                  {{ acceptedMap[msg.transfer_id] ? '已采纳' : '采纳' }}
+                </button>
+                <div v-if="msg.acceptError" class="accept-error">{{ msg.acceptError }}</div>
+              </div>
+              <div v-if="msg.type === 'user'" class="avatar user-avatar">
+                {{ authStore.profile?.full_name?.[0] || 'U' }}
+              </div>
+            </template>
+          </div>
         </template>
       </div>
 

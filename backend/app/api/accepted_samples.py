@@ -14,7 +14,7 @@ from app.schemas.accepted_sample import AcceptedSampleCreate, AcceptedSampleResp
 router = APIRouter()
 
 
-def to_response(sample: AcceptedSample) -> AcceptedSampleResponse:
+def _to_response(sample: AcceptedSample) -> AcceptedSampleResponse:
     return AcceptedSampleResponse(
         id=sample.id,
         transfer_id=sample.transfer_id,
@@ -27,6 +27,14 @@ def to_response(sample: AcceptedSample) -> AcceptedSampleResponse:
         model_code=sample.model_code,
         model_name=sample.model_name,
         username=sample.user.username,
+    )
+
+
+def _get_with_user(db: Session, sample_id: int) -> AcceptedSample | None:
+    return db.scalar(
+        select(AcceptedSample)
+        .options(joinedload(AcceptedSample.user))
+        .where(AcceptedSample.id == sample_id)
     )
 
 
@@ -80,15 +88,16 @@ def create_accepted_sample(
             )
         )
         if existing:
-            return to_response(existing)
+            return _to_response(existing)
         raise
 
-    sample = db.scalar(
-        select(AcceptedSample)
-        .options(joinedload(AcceptedSample.user))
-        .where(AcceptedSample.id == sample.id)
-    )
-    return to_response(sample)
+    sample_with_user = _get_with_user(db, sample.id)
+    if not sample_with_user:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="采纳样本保存失败",
+        )
+    return _to_response(sample_with_user)
 
 
 @router.get("", response_model=list[AcceptedSampleResponse])
@@ -104,4 +113,4 @@ def list_accepted_samples(
     if not current_user.is_admin:
         stmt = stmt.where(AcceptedSample.user_id == current_user.id)
     samples = list(db.scalars(stmt).all())
-    return [to_response(sample) for sample in samples]
+    return [_to_response(sample) for sample in samples]

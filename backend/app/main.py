@@ -8,6 +8,8 @@ from app.api.transfers import router as transfers_router
 from app.api.users import router as users_router
 from app.core.config import settings
 from app.services.model_runner import rewrite_text
+
+
 app = FastAPI(title=settings.app_name)
 
 app.add_middleware(

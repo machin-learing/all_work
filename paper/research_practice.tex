@@ -410,6 +410,7 @@ mT0-LoRA vs baseline & 验证微调是否有效 & baseline 是否存在输出僵
   \item \texttt{/api/auth}：注册、登录、JWT 鉴权。
   \item \texttt{/api/meta}：返回角色列表和模型列表。
   \item \texttt{/api/transfers}：接收改写请求，调用模型服务并写入历史记录。
+  \item \texttt{/api/accepted-samples}：保存用户采纳的高质量改写结果，供管理员查看和后续整理。
   \item \texttt{/api/users}：管理员查看用户信息。
 \end{itemize}
 
@@ -437,6 +438,7 @@ mT0-LoRA vs baseline & 验证微调是否有效 & baseline 是否存在输出僵
 \texttt{role\_options} & 目标对象选项，包含角色代码、名称和描述。 \\
 \texttt{model\_options} & 模型选项，包含 DeepSeek、baseline 和 LoRA 微调模型。 \\
 \texttt{transfer\_records} & 改写历史，记录用户、角色、模型、原句、改写结果和时间。 \\
+\texttt{accepted\_samples} & 采纳样本池，保存用户认可的改写结果，用于后续人工审核和增量训练数据整理。 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -451,7 +453,14 @@ mT0-LoRA vs baseline & 验证微调是否有效 & baseline 是否存在输出僵
   \item \textbf{多模型对比：} 同一句话在同一目标对象下比较不同模型输出。
   \item \textbf{示例输入：} 提供典型测试句，便于演示和复现实验。
   \item \textbf{历史记录：} 左侧展示用户历史改写结果，便于回看和比较。
+  \item \textbf{采纳样本：} 用户可采纳质量较高的改写结果，管理员可查看采纳样本池。
 \end{itemize}
+
+\subsection{用户反馈与样本采集}
+
+为了使系统具备后续持续优化能力，项目在演示平台中加入了轻量级用户反馈机制。用户在查看模型生成的改写结果后，可以对认为质量较高的结果进行“采纳”。系统会将被采纳的样本保存到候选训练样本表中，记录原句、目标对象、模型类型、改写结果、采纳用户和创建时间等信息。管理员可以在后台查看采纳样本池，用于后续人工复核和数据整理。
+
+该机制并不直接触发线上自动训练，而是作为增量数据沉淀入口。这样可以避免未经审核的用户反馈直接进入训练集，降低噪声样本对模型的影响。当采纳样本积累到一定规模后，工作人员可以筛选高质量样本，并导出为与现有 LoRA 训练数据一致的格式，再通过离线训练脚本继续微调模型。由此，系统可以形成“模型生成--用户采纳--人工审核--增量训练--模型更新”的持续优化闭环。
 
 \subsection{接口与功能测试}
 
@@ -470,6 +479,7 @@ mT0-LoRA vs baseline & 验证微调是否有效 & baseline 是否存在输出僵
 \path{/api/meta/models} & 模型列表 & 返回 DeepSeek、mT0-LoRA、baseline 等可选模型。 \\
 \path{/api/transfers} & 单次改写 & 返回目标角色下的改写文本，并写入历史记录。 \\
 \path{/api/transfers/history} & 历史记录 & 返回当前用户历史改写结果，支持前端展示。 \\
+\path{/api/accepted-samples} & 采纳样本 & 保存或查看用户采纳的高质量改写结果。 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -674,6 +684,7 @@ baseline & 待补充 & 待补充 & 待补充 & 待补充 \\
   \item \textbf{数据增强：} 对角色输出过于相似或语义漂移的样本进行定向重生成，引入人工复核集。
   \item \textbf{模型优化：} 比较 mT5、mT0、中文 T5 和更小参数模型的效果，探索不同 LoRA rank 和输入模板。
   \item \textbf{评估体系：} 建立包含语义保持、角色适配、自然流畅、角色区分四个维度的人工评价表。
+  \item \textbf{增量训练平台：} 在现有采纳样本池基础上，进一步增加训练任务管理功能，包括在线配置训练参数、查看训练日志、展示 loss 曲线和管理不同 LoRA 版本。考虑到训练任务耗时较长且会占用 GPU 资源，当前系统仅实现样本采集和管理员查看功能，训练过程仍由工作人员离线触发。
 \end{enumerate}
 
 \subsection{实训收获}
