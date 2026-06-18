@@ -274,7 +274,11 @@ W' = W + \Delta W,\quad \Delta W = BA
 
 其中 $A$ 和 $B$ 的秩远小于原矩阵维度。这样既保留了预训练模型的语言能力，又能以较低显存和存储成本适配下游任务。
 
-项目初期采用“每个角色一个 LoRA 适配器”的方案，但在小样本条件下，每个角色可用数据较少，模型容易过拟合固定表达。后续改为“单 LoRA + 角色条件输入”的方案，使模型共享所有角色数据，共同学习语义保持和自然改写能力，再通过对象和风格字段控制输出。
+\subsection{单 LoRA 与多 LoRA 方案选择}
+
+项目初期考虑过“每个角色一个 LoRA 适配器”的方案，即分别为老板、同事、好朋友、女朋友和母亲训练独立适配器。这种方案结构直观，但并不适合本项目的小样本条件。过滤后有效角色改写总数为 8957 条，若拆分为五个独立 LoRA，每个角色只能使用约一千余条样本，容易学习到“您”“宝贝”“妈”等表层模板词，而难以稳定学习语义保持、句式重组和自然表达能力。
+
+因此，本项目最终采用“单 LoRA + 角色条件输入”的方案。所有角色样本共享同一个 LoRA 适配器，模型在统一数据中学习通用的中文改写能力和事实保持能力，再通过输入模板中的“对象”和“风格”字段控制输出方向。该方案有四点优势：第一，扩大了每次训练可利用的数据规模，降低单角色过拟合风险；第二，使不同角色共享语义保持、时间数字保留和自然改写等公共能力；第三，部署时只需加载一个适配器，存储和推理管理更简单；第四，训练模板与后端推理模板保持一致，便于在 Web 系统中通过角色参数直接切换输出风格。对于本项目这种五类角色、数据规模有限、需要系统演示的场景，单 LoRA 条件模型比多 LoRA 方案更稳妥。
 
 \section{模型设计与实验过程}
 
@@ -336,14 +340,23 @@ W' = W + \Delta W,\quad \Delta W = BA
 LoRA rank & 16 \\
 LoRA alpha & 32 \\
 LoRA dropout & 0.1 \\
-学习率 & $1\times10^{-4}$ \\
+学习率 & $5\times10^{-5}$ \\
 训练轮数 & 8 \\
-batch size & 4，可根据显存调整为 2 或 1 \\
+batch size & 8 \\
+梯度累积步数 & 1 \\
+训练精度 & bf16 \\
+训练/验证/测试样本数 & 7165 / 895 / 897 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-模型训练脚本位于 \path{finetune/train_lora.py}。训练完成后适配器保存至 \path{finetune/output/final/}，后端推理服务加载 mT0-large 基座模型和该 LoRA 适配器。
+模型训练脚本位于 \path{finetune/train_lora.py}。本次训练命令为：
+
+\begin{lstlisting}[language={},caption={LoRA 微调命令}]
+python train_lora.py --epochs 8 --batch-size 8 --grad-accum-steps 1 --lr 5e-5 --lora-r 16 --lora-alpha 32
+\end{lstlisting}
+
+训练完成后适配器保存至 \path{finetune/output/final/}，后端推理服务加载 mT0-large 基座模型和该 LoRA 适配器。训练过程日志、损失曲线和测试集预测结果分别保存于 \path{finetune/output/artifacts/} 和 \path{finetune/output/predictions/}。
 
 \subsection{训练过程记录}
 
@@ -351,10 +364,12 @@ batch size & 4，可根据显存调整为 2 或 1 \\
 
 \begin{figure}[H]
 \centering
-\fbox{\parbox[c][4cm][c]{10cm}{\centering 待补充：正式微调后放入 \texttt{paper/figures/train\_eval\_loss\_curve.png}}}
+\includegraphics[width=0.85\textwidth]{figures/train_eval_loss_curve.png}
 \caption{LoRA 微调训练集与验证集损失曲线}
 \label{fig:train_eval_loss_curve}
 \end{figure}
+
+从图~\ref{fig:train_eval_loss_curve} 可以看出，训练集损失在前期下降较快，随后进入较平稳的下降阶段；验证集损失整体也保持下降趋势，未出现训练损失下降而验证损失明显反弹的情况。最终在测试集上得到的 \texttt{eval\_loss} 为 1.2962，最优验证指标对应的 checkpoint 为 \path{output/checkpoint-6900}。这说明在当前数据规模下，单 LoRA 条件模型能够学习到主要的角色改写映射关系，同时没有出现明显过拟合迹象。
 
 \subsection{实验中的主要问题与处理}
 
@@ -485,6 +500,26 @@ mT0-LoRA vs baseline & 验证微调是否有效 & baseline 是否存在输出僵
 
 从质检报告看，主要问题来源包括模板式改写、原始 N/A、时间关键词丢失、数字丢失和语义相似度过低。这说明中文角色风格迁移不仅需要生成自然表达，还需要严格保护事实信息，不能简单追求“更像某个角色”。
 
+模型训练完成后，在 897 条测试样本上进行评估，测试集 \texttt{eval\_loss} 为 1.2962，测试推理速度约为 99.58 samples/s。本次训练共进行 8 轮，最优验证指标对应 \path{output/checkpoint-6900}，训练结束后将最终适配器保存到 \path{finetune/output/final/}。这些结果主要用于说明微调过程已经正常收敛；由于本任务存在多种合理改写方式，loss 仍需与样例分析和人工评价结合使用。
+
+\begin{table}[H]
+\centering
+\caption{LoRA 微调测试结果}
+\label{tab:lora_test_metrics}
+\begin{tabular}{c|c}
+\toprule
+指标 & 数值 \\
+\midrule
+测试样本数 & 897 \\
+测试集 \texttt{eval\_loss} & 1.2962 \\
+测试耗时 & 9.01 s \\
+测试吞吐 & 99.58 samples/s \\
+最佳 checkpoint & \path{output/checkpoint-6900} \\
+最佳验证 loss & 1.3211 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
 \subsection{损失指标说明}
 
 需要说明的是，生成任务中的 loss 并不能直接等同于最终生成质量。本文任务属于开放式中文文本改写，同一原句在同一目标对象下可能存在多种合理表达方式，而训练损失主要衡量模型生成参考文本时的 token 级概率。因此，loss 更适合作为训练过程是否收敛、验证集性能是否稳定以及是否出现过拟合的参考指标，而不能单独用于判断角色风格迁移效果。
@@ -528,6 +563,26 @@ baseline & 待补充 & 待补充 & 待补充 & 待补充 \\
 
 \subsection{样例分析}
 
+为观察微调模型的实际输出，本文从测试集预测文件 \path{finetune/output/predictions/comparison_samples.csv} 中选取若干样例。表~\ref{tab:lora_prediction_examples} 展示了目标文本与模型预测文本的对比。
+
+\begin{table}[H]
+\centering
+\caption{mT0-LoRA 测试集预测样例}
+\label{tab:lora_prediction_examples}
+\begin{tabular}{p{1.6cm}|p{3.4cm}|p{3.8cm}|p{3.8cm}}
+\toprule
+对象 & 原句 & 参考改写 & 模型预测 \\
+\midrule
+老板 & 我发现你经常出差的啊。 & 我发现您出差比较频繁。 & 我发现您经常出差了。 \\
+女朋友 & 你现在来我家，我就请你吃这顿，过着村没这店，嘘，不要告诉别人喔！ & 你现在来我家，我就请你吃这顿，过了这村没这店，嘘，别告诉别人哦～ & 宝贝，你现在来我家，我就请你吃这顿，过着村没这店，嘘，别告诉别人喔！ \\
+好朋友 & 我11和12月都没排计划好么。 & 我11月和12月都没排计划好吧。 & 我11和12月都没排计划，好吗？ \\
+老板 & 我今天做表格从早上八点半做到下午六点 & 我今天从早上八点半到下午六点都在做表格。 & 我今天做表格从早上八点半到下午六点。 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+从上述样例可以看到，微调模型能够学习到部分角色化表达规律。例如，对老板的输出中能够使用“您”等礼貌表达；对女朋友的输出中能够加入“宝贝”等亲密称呼。但模型也存在改写幅度不足的问题，部分输出只是轻微调整标点或称呼，句式组织和信息重点变化不够明显。
+
 \begin{table}[H]
 \centering
 \caption{角色改写样例}
@@ -548,7 +603,23 @@ baseline & 待补充 & 待补充 & 待补充 & 待补充 \\
 
 \subsection{错误案例分析}
 
-模型输出中的错误可按表~\ref{tab:error_analysis} 进行归类。后续可从系统测试或测试集推理结果中选取真实样例，补充“原句、目标角色、错误输出、原因分析、改进方向”。
+模型输出中的错误可按表~\ref{tab:error_analysis} 进行归类。结合测试集预测结果，本项目当前主要问题包括角色风格弱化、模板称呼依赖和事实细节保留不足。表~\ref{tab:lora_error_examples} 给出部分真实错误案例。
+
+\begin{table}[H]
+\centering
+\caption{mT0-LoRA 错误案例}
+\label{tab:lora_error_examples}
+\begin{tabular}{p{2.2cm}|p{3.4cm}|p{4.2cm}|p{3.2cm}}
+\toprule
+问题类型 & 原句与对象 & 模型输出 & 分析 \\
+\midrule
+角色适配不足 & 对老板：你这是不打算理我了？ & 你这是不打算理我了？ & 没有转换为更礼貌、克制的表达，对上级场景不合适。 \\
+改写幅度不足 & 对女朋友：好嘞告诉朵哥我回她短信啦 & 好嘞，告诉朵哥我回她短信啦。 & 只做了标点整理，没有体现亲密和情绪关照。 \\
+事实表达不完整 & 对好朋友：我11和12月都没排计划好么。 & 我11和12月都没排计划，好吗？ & 保留了数字信息，但表达不够自然，且“11和12月”不如“11月和12月”清晰。 \\
+风格弱化 & 对老板：等我回来带我小侄儿一起玩！ & 等我回来带我小侄儿一起玩！ & 输出几乎未改写，未体现工作场景中的正式语气。 \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \begin{table}[H]
 \centering
