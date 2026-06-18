@@ -3,6 +3,7 @@ from sqlalchemy import select
 from app.core.security import hash_password
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
+from app.models.accepted_sample import AcceptedSample
 from app.models.model_option import ModelOption
 from app.models.role_option import RoleOption
 from app.models.user import User
@@ -21,7 +22,7 @@ def init_db() -> None:
         ]
         seed_models = [
             ("deepseek_api", "DeepSeek 教师模型", "千帆 DeepSeek V3.2，真实 API 调用"),
-            ("transformer_scratch", "自训练模型", "Transformer 从零训练 baseline"),
+            ("transformer_scratch", "规则输出", "基于角色前后缀的规则 baseline"),
             ("lora_finetuned", "微调模型", "预训练模型 + LoRA 微调"),
         ]
 
@@ -34,6 +35,9 @@ def init_db() -> None:
             exists = db.scalar(select(ModelOption).where(ModelOption.code == code))
             if not exists:
                 db.add(ModelOption(code=code, name=name, description=desc))
+            else:
+                exists.name = name
+                exists.description = desc
 
         admin = db.scalar(select(User).where(User.username == "admin"))
         if not admin:

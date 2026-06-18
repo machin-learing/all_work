@@ -39,6 +39,23 @@ CREATE TABLE IF NOT EXISTS transfer_records (
   CONSTRAINT fk_transfer_model FOREIGN KEY (model_id) REFERENCES model_options(id)
 );
 
+CREATE TABLE IF NOT EXISTS accepted_samples (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  transfer_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  role_code VARCHAR(50) NOT NULL,
+  role_name VARCHAR(50) NOT NULL,
+  model_code VARCHAR(50) NOT NULL,
+  model_name VARCHAR(50) NOT NULL,
+  source_text TEXT NOT NULL,
+  rewritten_text TEXT NOT NULL,
+  review_status VARCHAR(20) NOT NULL DEFAULT 'pending',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_accepted_transfer_user (transfer_id, user_id),
+  CONSTRAINT fk_accepted_transfer FOREIGN KEY (transfer_id) REFERENCES transfer_records(id),
+  CONSTRAINT fk_accepted_user FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
 INSERT INTO role_options (code, name, description)
 VALUES
   ('boss', '老板', '上级，远距离，工作领域'),
@@ -51,7 +68,7 @@ ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description);
 INSERT INTO model_options (code, name, description)
 VALUES
   ('deepseek_api', 'DeepSeek 教师模型', '千帆 DeepSeek V3.2，真实 API 调用'),
-  ('transformer_scratch', '自训练模型', 'Transformer 从零训练 baseline'),
+  ('transformer_scratch', '规则输出', '基于角色前后缀的规则 baseline'),
   ('lora_finetuned', '微调模型', '预训练模型 + LoRA 微调')
 ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description);
 

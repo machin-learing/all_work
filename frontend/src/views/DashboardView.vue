@@ -10,10 +10,13 @@ const authStore = useAuthStore()
 const models = ref([])
 const roles = ref([])
 const records = ref([])
+const acceptedSamples = ref([])
 const loading = ref(false)
 const showUserMenu = ref(false)
+const showAcceptedSamples = ref(false)
 const chatMessages = ref([])
 const chatContainer = ref(null)
+const acceptedMap = reactive({})
 
 const examples = [
   '我今天加班，可能晚点回去',
@@ -47,6 +50,14 @@ async function loadRecords() {
   records.value = data
 }
 
+async function loadAcceptedSamples() {
+  const { data } = await http.get('/accepted-samples')
+  acceptedSamples.value = data
+  data.forEach(sample => {
+    acceptedMap[sample.transfer_id] = true
+  })
+}
+
 function roleLabel(code) {
   return roles.value.find(role => role.code === code)?.name || code
 }
@@ -56,6 +67,7 @@ function modelLabel(code) {
 }
 
 function selectHistory(record) {
+  showAcceptedSamples.value = false
   form.role_code = record.role_code
   form.model_code = record.model_code
   form.mode = 'single'
@@ -65,12 +77,14 @@ function selectHistory(record) {
       type: 'model',
       text: record.rewritten_text,
       role_code: record.role_code,
-      model_code: record.model_code
+      model_code: record.model_code,
+      transfer_id: record.id
     }
   ]
 }
 
 function newChat() {
+  showAcceptedSamples.value = false
   chatMessages.value = []
   form.source_text = ''
 }
@@ -94,7 +108,8 @@ async function submitSingle(text) {
     type: 'model',
     text: data.rewritten_text,
     role_code: data.role_code,
-    model_code: data.model_code
+    model_code: data.model_code,
+    transfer_id: data.id
   })
   records.value.unshift(data)
 }
@@ -110,6 +125,7 @@ async function submitRoleCompare(text) {
       return {
         role_code: result.value.role_code,
         model_code: result.value.model_code,
+        transfer_id: result.value.id,
         text: result.value.rewritten_text
       }
     }
@@ -138,6 +154,7 @@ async function submitModelCompare(text) {
       return {
         role_code: result.value.role_code,
         model_code: result.value.model_code,
+        transfer_id: result.value.id,
         text: result.value.rewritten_text
       }
     }
@@ -159,6 +176,7 @@ async function submitRewrite() {
   const text = form.source_text.trim()
   if (!text || loading.value) return
 
+  showAcceptedSamples.value = false
   loading.value = true
   chatMessages.value.push({ type: 'user', text })
 
@@ -186,6 +204,24 @@ async function submitRewrite() {
   }
 }
 
+async function acceptSample(item) {
+  if (!item.transfer_id || acceptedMap[item.transfer_id]) return
+  try {
+    const { data } = await http.post('/accepted-samples', {
+      transfer_id: item.transfer_id
+    })
+    acceptedMap[item.transfer_id] = true
+    acceptedSamples.value.unshift(data)
+  } catch (error) {
+    item.acceptError = error.response?.data?.detail || '采纳失败'
+  }
+}
+
+async function openAcceptedSamples() {
+  showAcceptedSamples.value = true
+  await loadAcceptedSamples()
+}
+
 function scrollToBottom() {
   if (chatContainer.value) {
     chatContainer.value.scrollTop = chatContainer.value.scrollHeight
@@ -200,6 +236,7 @@ function logout() {
 onMounted(async () => {
   if (!authStore.profile) await authStore.fetchProfile()
   await Promise.all([loadMeta(), loadRecords()])
+  await loadAcceptedSamples()
 })
 </script>
 
@@ -255,6 +292,15 @@ onMounted(async () => {
           </button>
         </div>
 
+        <button
+          v-if="isAdmin"
+          class="sample-pool-btn"
+          :class="{ active: showAcceptedSamples }"
+          @click="openAcceptedSamples"
+        >
+          样本池
+        </button>
+
         <div class="role-selector" v-if="form.mode !== 'roles'">
           <span class="selector-label">对象</span>
           <select v-model="form.role_code">
@@ -282,12 +328,31 @@ onMounted(async () => {
       </div>
 
       <div class="chat-area" ref="chatContainer">
-        <div v-if="chatMessages.length === 0" class="chat-placeholder">
-          <div class="placeholder-icon">文本风格迁移</div>
-          <h3>输入一句话，观察不同对象或模型下的表达差异</h3>
-          <p>五角色对比适合展示研究主题；多模型对比适合比较 DeepSeek、mT0-LoRA 和 baseline。</p>
+        <div v-if="showAcceptedSamples" class="sample-pool">
+          <div class="sample-pool-header">
+            <h3>采纳样本</h3>
+            <span>{{ acceptedSamples.length }} 条</span>
+          </div>
+          <div v-if="acceptedSamples.length === 0" class="history-empty">暂无采纳样本</div>
+          <div
+            v-for="sample in acceptedSamples"
+            :key="sample.id"
+            class="sample-item"
+          >
+            <div class="sample-meta">
+              {{ sample.role_name }} · {{ sample.model_name }} · {{ sample.username }}
+            </div>
+            <div class="sample-source">{{ sample.source_text }}</div>
+            <div class="sample-output">{{ sample.rewritten_text }}</div>
+          </div>
         </div>
 
+        <div v-else-if="chatMessages.length === 0" class="chat-placeholder">
+          <div class="placeholder-icon">文本风格迁移</div>
+          <h3>输入一句话开始改写</h3>
+        </div>
+
+        <template v-if="!showAcceptedSamples">
         <div
           v-for="(msg, idx) in chatMessages"
           :key="idx"
@@ -308,6 +373,14 @@ onMounted(async () => {
                     {{ roleLabel(item.role_code) }} · {{ modelLabel(item.model_code) }}
                   </div>
                   <div class="comparison-text">{{ item.text }}</div>
+                  <button
+                    v-if="!item.isError"
+                    class="accept-btn"
+                    :disabled="acceptedMap[item.transfer_id]"
+                    @click="acceptSample(item)"
+                  >
+                    {{ acceptedMap[item.transfer_id] ? '已采纳' : '采纳' }}
+                  </button>
                 </div>
               </div>
             </div>
@@ -329,12 +402,21 @@ onMounted(async () => {
                 {{ roleLabel(msg.role_code) }} · {{ modelLabel(msg.model_code) }}
               </div>
               <div class="bubble-text">{{ msg.text }}</div>
+              <button
+                v-if="msg.type === 'model' && !msg.isError"
+                class="accept-btn"
+                :disabled="acceptedMap[msg.transfer_id]"
+                @click="acceptSample(msg)"
+              >
+                {{ acceptedMap[msg.transfer_id] ? '已采纳' : '采纳' }}
+              </button>
             </div>
             <div v-if="msg.type === 'user'" class="avatar user-avatar">
               {{ authStore.profile?.full_name?.[0] || 'U' }}
             </div>
           </template>
         </div>
+        </template>
       </div>
 
       <div class="chat-input-bar">

@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.accepted_samples import router as accepted_samples_router
 from app.api.auth import router as auth_router
 from app.api.meta import router as meta_router
 from app.api.transfers import router as transfers_router
@@ -24,7 +25,7 @@ def health() -> dict[str, str]:
 
 
 @app.on_event("startup")
-def preload_lora() -> None:
+def startup() -> None:
     if not settings.preload_lora_on_startup:
         return
 
@@ -41,3 +42,8 @@ app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(users_router, prefix="/api/users", tags=["users"])
 app.include_router(meta_router, prefix="/api/meta", tags=["meta"])
 app.include_router(transfers_router, prefix="/api/transfers", tags=["transfers"])
+app.include_router(
+    accepted_samples_router,
+    prefix="/api/accepted-samples",
+    tags=["accepted-samples"],
+)
