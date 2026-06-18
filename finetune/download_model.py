@@ -20,12 +20,12 @@ from pathlib import Path
 DEFAULT_MODEL_ID = "bigscience/mt0-large"
 DEFAULT_SAVE_DIR = Path("./models/mt0-large")
 IGNORE_PATTERNS = [
-    "tf_model*",
-    "flax_model*",
-    "onnx/*",
-    "*.onnx",
-    "*.onnx_data",
-    "model.safetensors",
+    r"tf_model.*",
+    r"flax_model.*",
+    r"onnx/.*",
+    r".*\.onnx$",
+    r".*\.onnx_data$",
+    r"model\.safetensors$",
 ]
 
 
