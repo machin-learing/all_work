@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     lora_model_dir: str = "../finetune/output"
     lora_base_model: str = "../finetune/models/mt0-large"
     lora_precision: str = "fp16"
+    preload_lora_on_startup: bool = False
 
     model_config = SettingsConfigDict(env_file=BACKEND_DIR / ".env", env_file_encoding="utf-8")
 
