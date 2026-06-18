@@ -1,10 +1,15 @@
 requests
-torch
-peft
-transformers
+# Huawei Cloud T4 image uses Driver 470 / CUDA 11.4.
+# Install CUDA PyTorch first with:
+# pip install torch==1.12.1+cu113 torchvision==0.13.1+cu113 torchaudio==0.12.1 -f https://download.pytorch.org/whl/torch_stable.html
+peft==0.5.0
+transformers==4.33.3
+accelerate==0.23.0
+huggingface-hub==0.17.3
+tokenizers==0.13.3
+safetensors==0.3.3
 matplotlib
 sentencepiece
-modelscope
 fastapi==0.115.12
 uvicorn[standard]==0.34.2
 sqlalchemy==2.0.41
