@@ -7,6 +7,10 @@ class AcceptedSampleCreate(BaseModel):
     transfer_id: int
 
 
+class AcceptedSampleReview(BaseModel):
+    review_status: str
+
+
 class AcceptedSampleResponse(BaseModel):
     id: int
     transfer_id: int

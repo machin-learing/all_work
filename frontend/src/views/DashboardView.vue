@@ -33,6 +33,24 @@ const form = reactive({
 })
 
 const isAdmin = computed(() => authStore.profile?.is_admin)
+const groupedAcceptedSamples = computed(() => {
+  const roleOrder = new Map(roles.value.map((role, index) => [role.code, index]))
+  const groups = new Map()
+  acceptedSamples.value.forEach(sample => {
+    const key = sample.role_code
+    if (!groups.has(key)) {
+      groups.set(key, {
+        role_code: sample.role_code,
+        role_name: sample.role_name,
+        samples: []
+      })
+    }
+    groups.get(key).samples.push(sample)
+  })
+  return Array.from(groups.values()).sort((left, right) => {
+    return (roleOrder.get(left.role_code) ?? 99) - (roleOrder.get(right.role_code) ?? 99)
+  })
+})
 
 async function loadMeta() {
   const [roleRes, modelRes] = await Promise.all([
@@ -57,7 +75,7 @@ async function loadAcceptedSamples() {
     delete acceptedMap[key]
   })
   data.forEach(sample => {
-    acceptedMap[sample.transfer_id] = true
+    acceptedMap[sample.transfer_id] = sample
   })
 }
 
@@ -207,23 +225,79 @@ async function submitRewrite() {
   }
 }
 
-async function acceptSample(item) {
+function reviewStatusLabel(status) {
+  const labels = {
+    pending: '待审核',
+    approved: '已采纳入库',
+    rejected: '已拒绝'
+  }
+  return labels[status] || status
+}
+
+async function likeSample(item) {
   if (!item.transfer_id || acceptedMap[item.transfer_id]) return
   item.acceptError = ''
   try {
     const { data } = await http.post('/accepted-samples', {
       transfer_id: item.transfer_id
     })
-    acceptedMap[item.transfer_id] = true
+    acceptedMap[item.transfer_id] = data
     acceptedSamples.value.unshift(data)
   } catch (error) {
-    item.acceptError = error.response?.data?.detail || '采纳失败'
+    item.acceptError = error.response?.data?.detail || '点赞失败'
   }
+}
+
+async function unlikeSample(item) {
+  if (!item.transfer_id || !acceptedMap[item.transfer_id]) return
+  item.acceptError = ''
+  try {
+    await http.delete(`/accepted-samples/by-transfer/${item.transfer_id}`)
+    delete acceptedMap[item.transfer_id]
+    acceptedSamples.value = acceptedSamples.value.filter(sample => {
+      return sample.transfer_id !== item.transfer_id
+    })
+  } catch (error) {
+    item.acceptError = error.response?.data?.detail || '取消点赞失败'
+  }
+}
+
+function toggleLike(item) {
+  if (acceptedMap[item.transfer_id]) {
+    return unlikeSample(item)
+  }
+  return likeSample(item)
 }
 
 async function openAcceptedSamples() {
   showAcceptedSamples.value = true
   await loadAcceptedSamples()
+}
+
+async function reviewSample(sample, reviewStatus) {
+  sample.reviewError = ''
+  try {
+    const { data } = await http.patch(`/accepted-samples/${sample.id}/review`, {
+      review_status: reviewStatus
+    })
+    Object.assign(sample, data)
+  } catch (error) {
+    sample.reviewError = error.response?.data?.detail || '审核失败'
+  }
+}
+
+async function downloadApprovedSamples() {
+  const { data } = await http.get('/accepted-samples/export', {
+    responseType: 'blob'
+  })
+  const url = URL.createObjectURL(data)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = 'approved_samples.jsonl'
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
 }
 
 function scrollToBottom() {
@@ -263,7 +337,7 @@ onMounted(async () => {
           <div class="history-text">
             {{ record.source_text.slice(0, 40) }}{{ record.source_text.length > 40 ? '...' : '' }}
           </div>
-          <div class="history-meta">{{ record.model_name }}</div>
+          <div class="history-meta">{{ modelLabel(record.model_code) }}</div>
         </div>
         <div v-if="records.length === 0" class="history-empty">暂无历史记录</div>
       </div>
@@ -302,7 +376,7 @@ onMounted(async () => {
           :class="{ active: showAcceptedSamples }"
           @click="openAcceptedSamples"
         >
-          样本池
+          点赞样本池
         </button>
 
         <div class="role-selector" v-if="form.mode !== 'roles'">
@@ -318,7 +392,7 @@ onMounted(async () => {
           <span class="selector-label">模型</span>
           <select v-model="form.model_code">
             <option v-for="model in models" :key="model.code" :value="model.code">
-              {{ model.name }}
+              {{ modelLabel(model.code) }}
             </option>
           </select>
         </div>
@@ -334,20 +408,59 @@ onMounted(async () => {
       <div class="chat-area" ref="chatContainer">
         <div v-if="showAcceptedSamples" class="sample-pool">
           <div class="sample-pool-header">
-            <h3>采纳样本</h3>
-            <span>{{ acceptedSamples.length }} 条</span>
-          </div>
-          <div v-if="acceptedSamples.length === 0" class="history-empty">暂无采纳样本</div>
-          <div
-            v-for="sample in acceptedSamples"
-            :key="sample.id"
-            class="sample-item"
-          >
-            <div class="sample-meta">
-              {{ sample.role_name }} · {{ sample.model_name }} · {{ sample.username }}
+            <div>
+              <h3>点赞样本池</h3>
+              <p>用户点赞后进入待审核，管理员确认后再采纳为二次训练数据。</p>
             </div>
-            <div class="sample-source">{{ sample.source_text }}</div>
-            <div class="sample-output">{{ sample.rewritten_text }}</div>
+            <button class="download-samples-btn" @click="downloadApprovedSamples">
+              下载已采纳数据
+            </button>
+          </div>
+          <div v-if="acceptedSamples.length === 0" class="history-empty">暂无点赞样本</div>
+          <div
+            v-for="group in groupedAcceptedSamples"
+            :key="group.role_code"
+            class="sample-role-group"
+          >
+            <div class="sample-role-title">
+              <span>{{ group.role_name }}</span>
+              <small>{{ group.samples.length }} 条</small>
+            </div>
+            <div
+              v-for="sample in group.samples"
+              :key="sample.id"
+              class="sample-item"
+            >
+              <div class="sample-meta">
+                {{ modelLabel(sample.model_code) }} · {{ sample.username }} · {{ reviewStatusLabel(sample.review_status) }}
+              </div>
+              <div class="sample-source">{{ sample.source_text }}</div>
+              <div class="sample-output">{{ sample.rewritten_text }}</div>
+              <div class="sample-actions" v-if="isAdmin">
+                <button
+                  class="review-btn approve"
+                  :disabled="sample.review_status === 'approved'"
+                  @click="reviewSample(sample, 'approved')"
+                >
+                  采纳入库
+                </button>
+                <button
+                  class="review-btn reject"
+                  :disabled="sample.review_status === 'rejected'"
+                  @click="reviewSample(sample, 'rejected')"
+                >
+                  拒绝
+                </button>
+                <button
+                  class="review-btn"
+                  :disabled="sample.review_status === 'pending'"
+                  @click="reviewSample(sample, 'pending')"
+                >
+                  恢复待审
+                </button>
+              </div>
+              <div v-if="sample.reviewError" class="accept-error">{{ sample.reviewError }}</div>
+            </div>
           </div>
         </div>
 
@@ -380,10 +493,9 @@ onMounted(async () => {
                     <button
                       v-if="!item.isError"
                       class="accept-btn"
-                      :disabled="acceptedMap[item.transfer_id]"
-                      @click="acceptSample(item)"
+                      @click="toggleLike(item)"
                     >
-                      {{ acceptedMap[item.transfer_id] ? '已采纳' : '采纳' }}
+                      {{ acceptedMap[item.transfer_id] ? '取消点赞' : '点赞' }}
                     </button>
                     <div v-if="item.acceptError" class="accept-error">{{ item.acceptError }}</div>
                   </div>
@@ -410,10 +522,9 @@ onMounted(async () => {
                 <button
                   v-if="msg.type === 'model' && !msg.isError"
                   class="accept-btn"
-                  :disabled="acceptedMap[msg.transfer_id]"
-                  @click="acceptSample(msg)"
+                  @click="toggleLike(msg)"
                 >
-                  {{ acceptedMap[msg.transfer_id] ? '已采纳' : '采纳' }}
+                  {{ acceptedMap[msg.transfer_id] ? '取消点赞' : '点赞' }}
                 </button>
                 <div v-if="msg.acceptError" class="accept-error">{{ msg.acceptError }}</div>
               </div>

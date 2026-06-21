@@ -22,8 +22,8 @@ def init_db() -> None:
         ]
         seed_models = [
             ("deepseek_api", "DeepSeek 教师模型", "千帆 DeepSeek V3.2，真实 API 调用"),
-            ("transformer_scratch", "规则输出", "基于角色前后缀的规则 baseline"),
-            ("lora_finetuned", "微调模型", "预训练模型 + LoRA 微调"),
+            ("transformer_scratch", "规则改写", "基于角色前后缀模板的规则 baseline"),
+            ("lora_finetuned", "LoRA 微调模型", "mT0-large + LoRA 微调模型"),
         ]
 
         for code, name, desc in seed_roles:
@@ -35,9 +35,6 @@ def init_db() -> None:
             exists = db.scalar(select(ModelOption).where(ModelOption.code == code))
             if not exists:
                 db.add(ModelOption(code=code, name=name, description=desc))
-            else:
-                exists.name = name
-                exists.description = desc
 
         admin = db.scalar(select(User).where(User.username == "admin"))
         if not admin:

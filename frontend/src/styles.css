@@ -459,11 +459,30 @@ button, input, select, textarea { font: inherit; }
   align-items: center;
   justify-content: space-between;
   margin-bottom: 12px;
+  gap: 12px;
 }
 
 .sample-pool-header h3 {
   margin: 0;
   font-size: 18px;
+}
+
+.sample-pool-header p {
+  margin: 4px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.download-samples-btn {
+  width: auto;
+  flex-shrink: 0;
+  padding: 7px 12px;
+  border: 1px solid var(--color-primary);
+  border-radius: 6px;
+  background: var(--color-primary);
+  color: white;
+  cursor: pointer;
+  font-size: 13px;
 }
 
 .sample-pool-header span,
@@ -472,9 +491,40 @@ button, input, select, textarea { font: inherit; }
   font-size: 12px;
 }
 
-.sample-item {
-  padding: 12px 0;
+.sample-role-group {
+  margin-bottom: 18px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  overflow: hidden;
+}
+
+.sample-role-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: #f7f9fc;
   border-bottom: 1px solid var(--color-border);
+}
+
+.sample-role-title span {
+  color: var(--color-text);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.sample-role-title small {
+  color: var(--color-text-secondary);
+}
+
+.sample-item {
+  padding: 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.sample-item:last-child {
+  border-bottom: 0;
 }
 
 .sample-source {
@@ -485,6 +535,39 @@ button, input, select, textarea { font: inherit; }
 .sample-output {
   margin-top: 6px;
   white-space: pre-wrap;
+}
+
+.sample-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.review-btn {
+  width: auto;
+  padding: 5px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.review-btn.approve {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.review-btn.reject {
+  border-color: var(--color-error);
+  color: var(--color-error);
+}
+
+.review-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* 输入区域 */

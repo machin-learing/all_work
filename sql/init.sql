@@ -68,8 +68,8 @@ ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description);
 INSERT INTO model_options (code, name, description)
 VALUES
   ('deepseek_api', 'DeepSeek 教师模型', '千帆 DeepSeek V3.2，真实 API 调用'),
-  ('transformer_scratch', '规则输出', '基于角色前后缀的规则 baseline'),
-  ('lora_finetuned', '微调模型', '预训练模型 + LoRA 微调')
+  ('transformer_scratch', '规则改写', '基于角色前后缀模板的规则 baseline'),
+  ('lora_finetuned', 'LoRA 微调模型', 'mT0-large + LoRA 微调模型')
 ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description);
 
 INSERT INTO users (username, full_name, password_hash, is_admin, is_active)

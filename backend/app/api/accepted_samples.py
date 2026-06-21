@@ -1,14 +1,21 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+import json
+
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import get_current_user
+from app.api.deps import require_admin
 from app.db.session import get_db
 from app.models.accepted_sample import AcceptedSample
 from app.models.transfer_record import TransferRecord
 from app.models.user import User
-from app.schemas.accepted_sample import AcceptedSampleCreate, AcceptedSampleResponse
+from app.schemas.accepted_sample import (
+    AcceptedSampleCreate,
+    AcceptedSampleResponse,
+    AcceptedSampleReview,
+)
 
 
 router = APIRouter()
@@ -60,7 +67,7 @@ def create_accepted_sample(
         )
     if not current_user.is_admin and record.user_id != current_user.id:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="不能采纳其他用户的记录"
+            status_code=status.HTTP_403_FORBIDDEN, detail="不能点赞其他用户的记录"
         )
 
     sample = AcceptedSample(
@@ -95,7 +102,7 @@ def create_accepted_sample(
     if not sample_with_user:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="采纳样本保存失败",
+            detail="点赞样本保存失败",
         )
     return _to_response(sample_with_user)
 
@@ -114,3 +121,99 @@ def list_accepted_samples(
         stmt = stmt.where(AcceptedSample.user_id == current_user.id)
     samples = list(db.scalars(stmt).all())
     return [_to_response(sample) for sample in samples]
+
+
+@router.delete("/by-transfer/{transfer_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_liked_sample(
+    transfer_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    sample = db.scalar(
+        select(AcceptedSample).where(
+            AcceptedSample.transfer_id == transfer_id,
+            AcceptedSample.user_id == current_user.id,
+        )
+    )
+    if not sample:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="点赞记录不存在"
+        )
+    if sample.review_status == "approved":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="该样本已被管理员采纳入库，不能取消点赞",
+        )
+
+    db.delete(sample)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.patch("/{sample_id}/review", response_model=AcceptedSampleResponse)
+def review_sample(
+    sample_id: int,
+    payload: AcceptedSampleReview,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> AcceptedSampleResponse:
+    allowed_statuses = {"pending", "approved", "rejected"}
+    if payload.review_status not in allowed_statuses:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="审核状态必须是 pending、approved 或 rejected",
+        )
+
+    sample = _get_with_user(db, sample_id)
+    if not sample:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="点赞样本不存在"
+        )
+
+    sample.review_status = payload.review_status
+    db.commit()
+    db.refresh(sample)
+    sample_with_user = _get_with_user(db, sample.id)
+    if not sample_with_user:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="审核状态更新失败",
+        )
+    return _to_response(sample_with_user)
+
+
+@router.get("/export")
+def export_approved_samples(
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> Response:
+    stmt = (
+        select(AcceptedSample)
+        .where(AcceptedSample.review_status == "approved")
+        .order_by(AcceptedSample.role_code.asc(), AcceptedSample.created_at.asc())
+    )
+    samples = list(db.scalars(stmt).all())
+    lines = []
+    for sample in samples:
+        lines.append(
+            json.dumps(
+                {
+                    "role_code": sample.role_code,
+                    "role_name": sample.role_name,
+                    "model_code": sample.model_code,
+                    "source_text": sample.source_text,
+                    "rewritten_text": sample.rewritten_text,
+                },
+                ensure_ascii=False,
+            )
+        )
+    content = "\n".join(lines)
+    if content:
+        content += "\n"
+    return Response(
+        content=content,
+        media_type="application/x-ndjson; charset=utf-8",
+        headers={
+            "Content-Disposition": 'attachment; filename="approved_samples.jsonl"'
+        },
+    )
