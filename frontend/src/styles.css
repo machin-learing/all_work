@@ -243,6 +243,13 @@ button, input, select, textarea { font: inherit; }
   font-size: 13px;
 }
 
+.sample-page-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .mode-tabs {
   display: flex;
   align-items: center;
@@ -524,6 +531,37 @@ button, input, select, textarea { font: inherit; }
   color: white;
   cursor: pointer;
   font-size: 13px;
+}
+
+.sample-role-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0 14px;
+  overflow-x: auto;
+}
+
+.sample-role-tabs button {
+  width: auto;
+  padding: 7px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.sample-role-tabs button.active {
+  border-color: var(--color-primary);
+  background: #edf2ff;
+  color: var(--color-primary);
+}
+
+.sample-role-tabs span {
+  margin-left: 6px;
+  font-size: 11px;
+  color: inherit;
 }
 
 .sample-pool-header span,

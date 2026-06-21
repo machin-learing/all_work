@@ -14,6 +14,7 @@ const acceptedSamples = ref([])
 const loading = ref(false)
 const showUserMenu = ref(false)
 const showAcceptedSamples = ref(false)
+const activeSampleRole = ref('')
 const chatMessages = ref([])
 const chatContainer = ref(null)
 const acceptedMap = reactive({})
@@ -33,22 +34,9 @@ const form = reactive({
 })
 
 const isAdmin = computed(() => authStore.profile?.is_admin)
-const groupedAcceptedSamples = computed(() => {
-  const roleOrder = new Map(roles.value.map((role, index) => [role.code, index]))
-  const groups = new Map()
-  acceptedSamples.value.forEach(sample => {
-    const key = sample.role_code
-    if (!groups.has(key)) {
-      groups.set(key, {
-        role_code: sample.role_code,
-        role_name: sample.role_name,
-        samples: []
-      })
-    }
-    groups.get(key).samples.push(sample)
-  })
-  return Array.from(groups.values()).sort((left, right) => {
-    return (roleOrder.get(left.role_code) ?? 99) - (roleOrder.get(right.role_code) ?? 99)
+const visibleAcceptedSamples = computed(() => {
+  return acceptedSamples.value.filter(sample => {
+    return sample.role_code === activeSampleRole.value
   })
 })
 
@@ -272,6 +260,9 @@ function toggleLike(item) {
 async function openAcceptedSamples() {
   showAcceptedSamples.value = true
   await loadAcceptedSamples()
+  if (!activeSampleRole.value && roles.value.length) {
+    activeSampleRole.value = roles.value[0].code
+  }
 }
 
 async function reviewSample(sample, reviewStatus) {
@@ -369,7 +360,12 @@ onMounted(async () => {
           <h2>点赞样本池</h2>
           <p>按角色分组审核用户点赞结果，只有采纳入库的样本会进入导出数据集。</p>
         </div>
-        <button class="sample-pool-btn" @click="newChat">返回改写</button>
+        <div class="sample-page-actions">
+          <button class="download-samples-btn" @click="downloadApprovedSamples">
+            下载已采纳数据
+          </button>
+          <button class="sample-pool-btn" @click="newChat">返回改写</button>
+        </div>
       </div>
 
       <div v-else class="chat-header">
@@ -424,25 +420,30 @@ onMounted(async () => {
         <div v-if="showAcceptedSamples" class="sample-pool">
           <div class="sample-pool-header">
             <div>
-              <h3>点赞样本池</h3>
+              <h3>{{ roleLabel(activeSampleRole) }}点赞样本</h3>
               <p>用户点赞后进入待审核，管理员确认后再采纳为二次训练数据。</p>
             </div>
-            <button class="download-samples-btn" @click="downloadApprovedSamples">
-              下载已采纳数据
+          </div>
+          <div class="sample-role-tabs">
+            <button
+              v-for="role in roles"
+              :key="role.code"
+              :class="{ active: activeSampleRole === role.code }"
+              @click="activeSampleRole = role.code"
+            >
+              {{ role.name }}
+              <span>
+                {{ acceptedSamples.filter(sample => sample.role_code === role.code).length }}
+              </span>
             </button>
           </div>
           <div v-if="acceptedSamples.length === 0" class="history-empty">暂无点赞样本</div>
-          <div
-            v-for="group in groupedAcceptedSamples"
-            :key="group.role_code"
-            class="sample-role-group"
-          >
-            <div class="sample-role-title">
-              <span>{{ group.role_name }}</span>
-              <small>{{ group.samples.length }} 条</small>
-            </div>
+          <div v-else-if="visibleAcceptedSamples.length === 0" class="history-empty">
+            当前角色暂无点赞样本
+          </div>
+          <div v-else class="sample-role-group">
             <div
-              v-for="sample in group.samples"
+              v-for="sample in visibleAcceptedSamples"
               :key="sample.id"
               class="sample-item"
             >
