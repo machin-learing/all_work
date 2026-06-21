@@ -30,4 +30,5 @@ dist/
 .vscode/
 .DS_Store
 project_todo.md
+ppt_outline_opening_report.md
 !finetune/output/final/*.safetensors

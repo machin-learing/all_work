@@ -78,16 +78,16 @@
 
 \begin{table}[H]
 \centering
-\caption{成员分工}
-\begin{tabular}{c|c|p{8.5cm}}
+\caption{成员分工与占比}
+\begin{tabular}{c|c|c|p{7.3cm}}
 \toprule
-成员 & 主要职责 & 具体工作内容 \\
+成员 & 分工占比 & 主要职责 & 具体工作内容 \\
 \midrule
-王浩楠 & 项目统筹与任务定义 & 设计研究问题、角色体系和整体实验方案，整理报告结构，协调数据、模型与系统模块。 \\
-张博凇 & 模型训练与微调 & 负责 mT0-large、LoRA 训练脚本、超参数配置、训练数据格式转换和推理接口适配。 \\
-范智杰 & 数据构建与质量控制 & 负责 LCCC 数据抽取、DeepSeek 批量改写、自动质检规则设计和过滤后数据集生成。 \\
-何顺康 & 前端系统开发 & 负责 Vue 3 页面、聊天式交互、五角色对比、多模型对比和历史记录展示。 \\
-陈佳铭 & 后端与数据库 & 负责 FastAPI 接口、用户鉴权、MySQL 表设计、历史记录存储和模型服务集成。 \\
+王浩楠 & 20\% & 项目统筹与任务定义 & 设计研究问题、角色体系和整体实验方案，整理报告结构，协调数据、模型与系统模块。 \\
+张博凇 & 20\% & 模型训练与微调 & 负责 mT0-large、LoRA 训练脚本、超参数配置、训练数据格式转换和推理接口适配。 \\
+范智杰 & 20\% & 数据构建与质量控制 & 负责 LCCC 数据抽取、DeepSeek 批量改写、自动质检规则设计和过滤后数据集生成。 \\
+何顺康 & 20\% & 前端系统开发 & 负责 Vue 3 页面、聊天式交互、五角色对比、多模型对比和历史记录展示。 \\
+陈佳铭 & 20\% & 后端与数据库 & 负责 FastAPI 接口、用户鉴权、MySQL 表设计、历史记录存储和模型服务集成。 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -479,28 +479,176 @@ mT0-LoRA vs baseline & 验证微调是否有效 & baseline 是否存在输出僵
 \path{/api/meta/models} & 模型列表 & 返回 DeepSeek、mT0-LoRA、baseline 等可选模型。 \\
 \path{/api/transfers} & 单次改写 & 返回目标角色下的改写文本，并写入历史记录。 \\
 \path{/api/transfers/history} & 历史记录 & 返回当前用户历史改写结果，支持前端展示。 \\
-\path{/api/accepted-samples} & 采纳样本 & 保存或查看用户采纳的高质量改写结果。 \\
+\path{/api/accepted-samples} & 点赞样本 & 保存用户点赞的改写结果，进入管理员待审核样本池。 \\
+\path{/api/accepted-samples/export} & 数据导出 & 管理员下载已采纳入库的高质量样本，用于后续二次训练。 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\subsection{系统截图占位}
+\subsection{系统截图与部署展示}
 
-报告定稿时建议加入真实系统截图，以展示项目不是停留在离线脚本阶段。截图可包括登录界面、单次改写、五角色对比、多模型对比和历史记录页面。若截图文件放入 \texttt{paper/figures/} 目录，可按下面格式引用。
+为说明本项目不仅完成了离线数据构建和模型微调，也实现了可交互的 Web 演示系统，本节补充系统主要页面截图。截图覆盖用户认证、文本改写、多角色对比、多模型对比、用户点赞、管理员审核、数据导出和服务器部署等环节，能够从工程侧支撑“数据--模型--系统--反馈”的完整闭环。
 
 \begin{figure}[H]
 \centering
-\fbox{\parbox[c][4cm][c]{10cm}{\centering 待补充：五角色对比页面截图}}
-\caption{五角色对比页面截图占位}
-\label{fig:role_compare_placeholder}
+\begin{minipage}{0.48\textwidth}
+\centering
+\includegraphics[width=\textwidth]{figures/login.png}
+\caption{系统登录页面}
+\label{fig:login_page}
+\end{minipage}
+\hfill
+\begin{minipage}{0.48\textwidth}
+\centering
+\includegraphics[width=\textwidth]{figures/register.png}
+\caption{系统注册页面}
+\label{fig:register_page}
+\end{minipage}
 \end{figure}
 
 \begin{figure}[H]
 \centering
-\fbox{\parbox[c][4cm][c]{10cm}{\centering 待补充：多模型对比页面截图}}
-\caption{多模型对比页面截图占位}
-\label{fig:model_compare_placeholder}
+\includegraphics[width=0.9\textwidth]{figures/main_user.png}
+\caption{普通用户主界面}
+\label{fig:main_user_page}
 \end{figure}
+
+图~\ref{fig:login_page} 和图~\ref{fig:register_page} 展示了系统的用户认证入口。用户登录后进入图~\ref{fig:main_user_page} 所示主界面，可选择目标对象、模型类型和改写模式，并查看历史记录。
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth]{figures/single_rewrite_mother_lora.png}
+\caption{单次改写示例：面向母亲的 LoRA 微调模型输出}
+\label{fig:single_rewrite_mother_lora}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth]{figures/role_compare_lora.png}
+\caption{五角色对比示例：同一句话在不同目标对象下的表达差异}
+\label{fig:role_compare_lora}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth]{figures/model_compare_boss.png}
+\caption{多模型对比示例：老板对象下不同模型的输出差异}
+\label{fig:model_compare_boss}
+\end{figure}
+
+图~\ref{fig:single_rewrite_mother_lora} 展示了单次改写流程，使用 LoRA 微调模型将输入句子改写为更适合对母亲表达的语气。图~\ref{fig:role_compare_lora} 展示了五角色对比功能，同一原句在老板、同事、好朋友、女朋友和母亲五类对象下生成不同表达。图~\ref{fig:model_compare_boss} 展示了多模型对比功能，可用于观察 DeepSeek 教师模型、规则改写 baseline 和 LoRA 微调模型之间的差异。
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.75\textwidth]{figures/liked_result.png}
+\caption{用户点赞反馈状态}
+\label{fig:liked_result}
+\end{figure}
+
+系统将原先的“采纳”行为调整为用户侧“点赞”反馈。用户认为某条改写结果较好时可以点赞，点赞结果不会直接进入训练集，而是进入管理员待审核样本池。
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth]{figures/admin_sample_pool_grouped.png}
+\caption{管理员点赞样本池：按角色选项卡查看样本}
+\label{fig:admin_sample_pool_grouped}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth]{figures/sample_review_actions.png}
+\caption{管理员样本审核操作}
+\label{fig:sample_review_actions}
+\end{figure}
+
+图~\ref{fig:admin_sample_pool_grouped} 展示了管理员端点赞样本池。系统按照目标角色设置选项卡，管理员可分别查看不同角色下的用户点赞样本，降低样本混杂带来的审核成本。图~\ref{fig:sample_review_actions} 展示了二次审核流程，管理员可将样本标记为“采纳入库”“拒绝”或“恢复待审”。只有审核通过的样本才会作为后续二次训练数据。
+
+\begin{figure}[H]
+\centering
+\begin{minipage}{0.48\textwidth}
+\centering
+\includegraphics[width=\textwidth]{figures/export_approved_samples1.png}
+\caption{已采纳样本下载入口}
+\label{fig:export_approved_samples1}
+\end{minipage}
+\hfill
+\begin{minipage}{0.48\textwidth}
+\centering
+\includegraphics[width=\textwidth]{figures/export_approved_samples2.png}
+\caption{已采纳样本导出结果}
+\label{fig:export_approved_samples2}
+\end{minipage}
+\end{figure}
+
+图~\ref{fig:export_approved_samples1} 和图~\ref{fig:export_approved_samples2} 展示了已采纳样本的导出功能。管理员可将审核通过的样本下载为本地数据文件，便于与原训练集拼接后继续进行 LoRA 增量训练。
+
+\begin{figure}[H]
+\centering
+\includegraphics[height=0.6\textheight]{figures/history_records.png}
+\caption{历史记录展示}
+\label{fig:history_records}
+\end{figure}
+
+图~\ref{fig:history_records} 展示了系统历史记录功能。用户可以回看先前输入、目标角色、模型类型和改写结果，从而支持结果复查和样本追踪。
+
+\subsubsection{华为云部署与运行验证}
+
+为满足项目在云端可运行、可访问、可演示的要求，本项目将前端、后端和数据库部署到华为云弹性云服务器。服务器公网 IP 为 \texttt{119.3.170.13}，前端通过 \texttt{5173} 端口对外提供访问，后端 FastAPI 服务通过 \texttt{8000} 端口提供接口。部署验证过程不仅关注页面是否能打开，还需要确认代码已在云服务器中启动、模型服务已加载、接口请求能够返回正常状态，并且浏览器端能够通过公网 IP 完成系统访问。
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth]{figures/huawei_ssh_login.png}
+\caption{通过 SSH 登录华为云服务器}
+\label{fig:huawei_ssh_login}
+\end{figure}
+
+图~\ref{fig:huawei_ssh_login} 展示了通过 \texttt{ssh root@119.3.170.13} 登录服务器的过程。终端中出现 Ubuntu 系统信息和 Huawei Cloud Service 提示，说明当前操作环境为华为云服务器，而不是本地开发环境。
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{figures/huawei_backend_start.png}
+\caption{华为云服务器后端服务启动结果}
+\label{fig:huawei_backend_start}
+\end{figure}
+
+图~\ref{fig:huawei_backend_start} 展示了后端服务在服务器中的启动过程。项目进入 \texttt{backend} 目录后执行 \texttt{uvicorn app.main:app --host 0.0.0.0 --port 8000}，服务启动时会预加载 LoRA 模型，并显示 \texttt{Uvicorn running on http://0.0.0.0:8000}。日志中还出现登录接口的 \texttt{200 OK} 返回，说明后端接口已能够接收来自前端的请求。
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{figures/huawei_frontend_start.png}
+\caption{华为云服务器前端服务启动结果}
+\label{fig:huawei_frontend_start}
+\end{figure}
+
+图~\ref{fig:huawei_frontend_start} 展示了前端服务在服务器中的启动过程。项目进入 \texttt{frontend} 目录后执行 \texttt{npm run dev -- --host 0.0.0.0 --port 5173}，Vite 服务成功启动，并绑定到 \texttt{0.0.0.0}。该设置使前端页面不仅能在服务器本地访问，也能通过公网 IP 和端口被外部浏览器访问。
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{figures/huawei_public_ip_access.png}
+\caption{通过公网 IP 和端口访问前端系统}
+\label{fig:huawei_public_ip_access}
+\end{figure}
+
+图~\ref{fig:huawei_public_ip_access} 展示了浏览器通过 \texttt{http://119.3.170.13:5173} 访问系统的结果。页面标题、角色选择、模型选择、历史记录和输入框均能正常显示，说明前端页面已经从云服务器对外提供服务。结合后端启动日志中的接口返回结果，可以证明系统已经完成前端、后端、模型推理服务与数据库的云端联调。
+
+\begin{figure}[H]
+\centering
+\begin{minipage}{0.48\textwidth}
+\centering
+\includegraphics[width=\textwidth]{figures/server_deployment.png}
+\caption{服务器公网访问效果}
+\label{fig:server_deployment}
+\end{minipage}
+\hfill
+\begin{minipage}{0.48\textwidth}
+\centering
+\includegraphics[width=\textwidth]{figures/server_deployment1.png}
+\caption{服务器运行状态}
+\label{fig:server_deployment1}
+\end{minipage}
+\end{figure}
+
+图~\ref{fig:server_deployment} 和图~\ref{fig:server_deployment1} 进一步展示了项目部署后的访问和运行状态。整体来看，云端验证覆盖了 SSH 登录、后端代码运行、前端代码运行、公网访问和功能页面展示五个环节，能够较完整地证明本项目已在华为云服务器上完成部署。
 
 \section{实验结果与分析}
 
