@@ -115,6 +115,24 @@ button, input, select, textarea { font: inherit; }
   font-size: 13px;
 }
 
+.sample-sidebar-note {
+  padding: 16px;
+  border-top: 1px solid var(--color-border);
+}
+
+.sample-sidebar-title {
+  margin-bottom: 8px;
+  color: var(--color-text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.sample-sidebar-text {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 /* 底部用户区 */
 
 .sidebar-footer {
@@ -200,6 +218,29 @@ button, input, select, textarea { font: inherit; }
   padding: 10px 20px;
   border-bottom: 1px solid var(--color-border);
   background: var(--color-surface);
+}
+
+.sample-page-header {
+  min-height: 72px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.sample-page-header h2 {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 18px;
+}
+
+.sample-page-header p {
+  margin: 4px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 13px;
 }
 
 .mode-tabs {

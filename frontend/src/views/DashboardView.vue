@@ -326,7 +326,14 @@ onMounted(async () => {
         <button class="new-chat-btn" @click="newChat">+ 新对话</button>
       </div>
 
-      <div class="history-list">
+      <div v-if="showAcceptedSamples" class="sample-sidebar-note">
+        <div class="sample-sidebar-title">点赞样本池</div>
+        <div class="sample-sidebar-text">
+          管理员在这里按角色检查用户点赞样本，确认无误后采纳为二次训练数据。
+        </div>
+      </div>
+
+      <div v-else class="history-list">
         <div
           v-for="record in records"
           :key="record.id"
@@ -357,7 +364,15 @@ onMounted(async () => {
     </aside>
 
     <main class="main-area">
-      <div class="chat-header">
+      <div v-if="showAcceptedSamples" class="sample-page-header">
+        <div>
+          <h2>点赞样本池</h2>
+          <p>按角色分组审核用户点赞结果，只有采纳入库的样本会进入导出数据集。</p>
+        </div>
+        <button class="sample-pool-btn" @click="newChat">返回改写</button>
+      </div>
+
+      <div v-else class="chat-header">
         <div class="mode-tabs">
           <button :class="{ active: form.mode === 'single' }" @click="form.mode = 'single'">
             单次改写
@@ -398,7 +413,7 @@ onMounted(async () => {
         </div>
       </div>
 
-      <div class="example-row">
+      <div v-if="!showAcceptedSamples" class="example-row">
         <span>示例</span>
         <button v-for="example in examples" :key="example" @click="useExample(example)">
           {{ example }}
@@ -536,7 +551,7 @@ onMounted(async () => {
         </template>
       </div>
 
-      <div class="chat-input-bar">
+      <div v-if="!showAcceptedSamples" class="chat-input-bar">
         <textarea
           v-model="form.source_text"
           placeholder="输入你想改写的话，例如：我今天加班，可能晚点回去"
