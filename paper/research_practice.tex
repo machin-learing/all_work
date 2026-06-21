@@ -24,26 +24,41 @@
   backgroundcolor=\color{gray!5}
 }
 
-\title{
-    \vspace{2cm}
-    {\heiti \Huge 《机器学习》科研实训报告} \\[1cm]
-    {\kaishu \LARGE 小样本条件下中文多角色文本风格迁移研究}
+\newcommand{\coverfield}[2]{%
+  \makebox[5.2cm][l]{\heiti\Large #1：} &
+  \underline{\makebox[8.4cm][c]{\Large #2}} \\[0.45cm]
 }
-\author{\kaishu 王浩楠 \quad 张博凇 \quad 范智杰 \quad 何顺康 \quad 陈佳铭}
-\date{\today}
+
+\newcommand{\makecoursecover}[1]{%
+\begin{titlepage}
+\centering
+\vspace*{2.2cm}
+\includegraphics[width=0.48\textwidth]{figures/fzu_sf.png}\par
+\vspace{2.1cm}
+{\heiti\fontsize{36pt}{44pt}\selectfont 《机器学习》\par}
+\vspace{0.25cm}
+{\heiti\fontsize{36pt}{44pt}\selectfont #1\par}
+\vspace{2.0cm}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{rl}
+  \makebox[5.2cm][l]{\heiti\Large 题\qquad 目：} &
+  \underline{\makebox[8.4cm][c]{\Large 小样本条件下中文多角色}} \\[0.35cm]
+  & \underline{\makebox[8.4cm][c]{\Large 文本风格迁移研究}} \\[0.45cm]
+  \coverfield{学生姓名（学号）}{王浩楠（102301325）}
+  \coverfield{学生姓名（学号）}{张博凇（102301314）}
+  \coverfield{学生姓名（学号）}{范智杰（102301340）}
+  \coverfield{学生姓名（学号）}{何顺康（102301336）}
+  \coverfield{学生姓名（学号）}{陈佳铭（102301539）}
+  \coverfield{指 导 教 师}{于元隆、朱丹红}
+\end{tabular}
+\end{titlepage}
+}
 
 \begin{document}
-\maketitle
-\thispagestyle{empty}
+\makecoursecover{科研实训报告}
 \newpage
 \tableofcontents
 \newpage
-
-\begin{abstract}
-日常中文交流中，同一句话在面对不同关系对象时往往需要采用不同表达方式。例如“我今天加班，可能晚点回去”对老板应更正式、克制并强调工作安排；对女朋友则应更亲密、安抚并体现情绪关照；对母亲则应尊重、温暖并降低长辈担忧。这类“同一语义、不同对象、不同表达”的现象体现了语言使用中的关系感知能力。现有文本风格迁移研究多关注情感极性、正式度或作者属性，对“说话对象”这一社会语用变量关注不足。
-
-本项目围绕中文多角色文本风格迁移任务，构建了包含老板、同事、好朋友、女朋友、母亲五类目标对象的平行改写数据集；基于 DeepSeek API 生成教师改写结果，并设计自动质检规则过滤语义漂移、数字丢失、时间信息丢失和模板化改写等低质量样本；在模型侧采用 mT0-large 作为指令式多语言基座模型，使用单 LoRA 适配器进行参数高效微调，使模型通过“对象+风格+原句”的输入模板完成角色条件改写；在系统侧开发了 FastAPI 后端、Vue 3 前端和 MySQL 数据库组成的演示平台，支持用户登录、单次改写、五角色对比、多模型对比和历史记录管理。项目形成了从数据构建、模型训练、质量控制到 Web 展示的完整闭环。
-\end{abstract}
 
 \section{实验概述}
 

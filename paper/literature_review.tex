@@ -21,13 +21,42 @@
   backgroundcolor=\color{gray!5}
 }
 
-\title{\heiti 文献综述：中文文本风格迁移与关系感知生成研究}
-\author{\kaishu 王浩楠 \quad 张博凇 \quad 范智杰 \quad 何顺康 \quad 陈佳铭}
-\date{\today}
+\newcommand{\coverfield}[2]{%
+  \makebox[5.2cm][l]{\heiti\Large #1：} &
+  \underline{\makebox[8.4cm][c]{\Large #2}} \\[0.45cm]
+}
+
+\newcommand{\makecoursecover}[1]{%
+\begin{titlepage}
+\centering
+\vspace*{2.2cm}
+\includegraphics[width=0.48\textwidth]{figures/fzu_sf.png}\par
+\vspace{2.1cm}
+{\heiti\fontsize{36pt}{44pt}\selectfont 《机器学习》\par}
+\vspace{0.25cm}
+{\heiti\fontsize{36pt}{44pt}\selectfont #1\par}
+\vspace{2.0cm}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{rl}
+  \makebox[5.2cm][l]{\heiti\Large 题\qquad 目：} &
+  \underline{\makebox[8.4cm][c]{\Large 小样本条件下中文多角色}} \\[0.35cm]
+  & \underline{\makebox[8.4cm][c]{\Large 文本风格迁移研究}} \\[0.45cm]
+  \coverfield{学生姓名（学号）}{王浩楠（102301325）}
+  \coverfield{学生姓名（学号）}{张博凇（102301314）}
+  \coverfield{学生姓名（学号）}{范智杰（102301340）}
+  \coverfield{学生姓名（学号）}{何顺康（102301336）}
+  \coverfield{学生姓名（学号）}{陈佳铭（102301539）}
+  \coverfield{指 导 教 师}{于元隆、朱丹红}
+\end{tabular}
+\end{titlepage}
+}
 
 \begin{document}
 
-\maketitle
+\makecoursecover{文献综述}
+
+\tableofcontents
+\newpage
 
 \begin{abstract}
 文本风格迁移是自然语言生成领域的重要任务，旨在保持文本语义内容不变的同时改变其风格属性。现有研究多集中于情感极性、正式度、作者属性和文本体裁等风格维度，而对“说话对象”这一日常沟通中极为关键的社会语用变量关注不足。中文交流具有丰富的称呼系统、礼貌等级和亲疏表达方式，同一句话在面对老板、同事、朋友、恋人和家人时往往需要采用不同的语气与信息组织方式。因此，关系感知的中文文本风格迁移不仅具有应用价值，也为文本风格迁移研究提供了更细粒度的任务设定。
@@ -35,8 +64,6 @@
 本文围绕“小样本条件下中文多角色文本风格迁移”这一研究主题，从五个方面梳理相关文献：第一，回顾文本风格迁移的任务定义、主流方法和评估指标；第二，分析中文对话数据集及其在角色风格标注方面的不足；第三，总结预训练语言模型、指令微调模型以及 mT5/mT0 等多语言 Seq2Seq 模型的发展；第四，讨论 LoRA 等参数高效微调技术在小样本生成任务中的优势；第五，从礼貌理论、语域理论和语言顺应论角度解释社会关系如何影响语言表达。最后，本文指出现有研究在中文关系角色风格迁移方向上的空白，并明确本项目的数据构建、模型训练和系统实现定位。
 \end{abstract}
 
-\newpage
-\tableofcontents
 \newpage
 
 \section{引言}
